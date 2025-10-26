@@ -31,6 +31,65 @@ def collect_performance_metrics(page):
     return metrics
 
 
+def collect_dns_and_connect_time(page, target_domain: str = "calls7.com"):
+    """
+    Собирает dnsResolveTime и connectTime для первого запроса к target_domain.
+    """
+    timings = {"dnsResolveTime": None, "connectTime": None}
+    recorded = False
+
+    def on_request(request):
+        nonlocal recorded
+        if recorded:
+            return
+        url = request.url
+        if url is None:
+            return
+        if target_domain in url:  # Используем локальную переменную url
+            timing = request.timing
+            if timing:
+                dns_start = timing.get("domainLookupStart", -1)
+                dns_end = timing.get("domainLookupEnd", -1)
+                connect_start = timing.get("connectStart", -1)
+                connect_end = timing.get("connectEnd", -1)
+
+                if dns_start >= 0 and dns_end >= 0:
+                    dns_time = dns_end - dns_start
+                    if dns_time >= 0:
+                        timings["dnsResolveTime"] = round(dns_time, 2)
+
+                if connect_start >= 0 and connect_end >= 0:
+                    connect_time = connect_end - connect_start
+                    if connect_time >= 0:
+                        timings["connectTime"] = round(connect_time, 2)
+
+                recorded = True
+
+    page.on("request", on_request)
+    return timings
+
+
+def inject_plyr_playing_listener(page):
+    page.evaluate("""
+        window.__videoStartTime = null;
+        const target = document.querySelector('.plyr');
+        if (target) {
+            const observer = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                        if (target.classList.contains('plyr--playing')) {
+                            window.__videoStartTime = performance.now();
+                            observer.disconnect();
+                            break;
+                        }
+                    }
+                }
+            });
+            observer.observe(target, { attributes: true, attributeFilter: ['class'] });
+        }
+    """)
+
+
 def save_json_report(data, filename="user_flow_report.json"):
     os.makedirs("reports", exist_ok=True)
     with open(f"reports/{filename}", "w", encoding="utf-8") as f:
@@ -41,40 +100,40 @@ def save_json_report(data, filename="user_flow_report.json"):
 @allure.severity(allure.severity_level.CRITICAL)
 def test_user_flow_with_metrics(page):
     report = {
-        "url": None,
+        "url": config.FILM_EXAMPLE_URL,
         "steps": {},
         "metrics": {},
         "pagePerformanceIndex": None,
         "videoStartTime": None,
         "popupAppearTime": None
     }
-    is_webdriver = page.evaluate("() => navigator.webdriver")
-    print("navigator.webdriver:", is_webdriver)
 
     # === Шаг 1: Главная страница ===
     with allure.step("Открыть главную и собрать метрики"):
+        dns_metrics = collect_dns_and_connect_time(page, "calls7.com")
         page.goto(config.BASE_URL)
         perf_main = collect_performance_metrics(page)
-        report["steps"]["main_page"] = perf_main
+        report["steps"]["main_page"] = {  # исправлена опечатка: mane_page → main_page
+            **perf_main,
+            "dnsResolveTime": dns_metrics["dnsResolveTime"],
+            "connectTime": dns_metrics["connectTime"]
+        }
 
-    # === Шаг 2: Выбор фильма через клик ===
-    with allure.step("Выбрать фильм"):
-        # film_title = "Черный замок"
-        # page.click(f"text={film_title}")
+    # === Шаг 2: Переход на страницу фильма ===
+    with allure.step("Перейти на страницу фильма"):
         page.goto(config.FILM_EXAMPLE_URL)
         page.wait_for_load_state("networkidle")
-        has_play_js = page.evaluate("""
-            () => {
-                const scripts = Array.from(document.querySelectorAll('script'));
-                return scripts.some(s => s.src.includes('play.js'));
-            }
-        """)
-        logger.info(f"Скрипт play.js загружен: {has_play_js}")
 
     # === Шаг 3: Сбор метрик страницы фильма ===
     with allure.step("Собрать метрики страницы фильма"):
+        dns_metrics = collect_dns_and_connect_time(page, "calls7.com")  # ← исправлено: домен, не URL
         perf_film = collect_performance_metrics(page)
-        report["steps"]["film_page"] = perf_film
+        report["steps"]["film_page"] = {
+            **perf_film,
+            "dnsResolveTime": dns_metrics["dnsResolveTime"],
+            "connectTime": dns_metrics["connectTime"]
+        }
+        report["metrics"] = report["steps"]["film_page"]
 
         ppi = config.calculate_page_performance_index(
             lcp=perf_film["lcp"],
@@ -84,57 +143,40 @@ def test_user_flow_with_metrics(page):
             ttfb=perf_film["ttfb"]
         )
         report["pagePerformanceIndex"] = ppi
-        report["metrics"] = perf_film
 
-        allure.attach(json.dumps(perf_film, indent=2), name="Lighthouse Metrics", attachment_type=allure.attachment_type.JSON)
+        allure.attach(json.dumps(report["metrics"], indent=2), name="Page Metrics", attachment_type=allure.attachment_type.JSON)
         allure.attach(f"pagePerformanceIndex: {ppi}", name="Performance Index", attachment_type=allure.attachment_type.TEXT)
 
     # === Шаг 4: Дождаться появления плеера ===
     with allure.step("Дождаться появления элемента <video>"):
         page.wait_for_selector("video", timeout=15000)
 
-    # === Шаг 5: Нажать Play и дождаться загрузки видео (.ts) ===
-    with allure.step("Нажать Play и дождаться первого сегмента видео"):
-        # Логирование консоли
+    # === Шаг 5: Нажать Play и замерить videoStartTime ===
+    with allure.step("Нажать Play и замерить videoStartTime"):
         page.on("console", lambda msg: 
             logger.warning(f"Console: {msg.text}") if "ERR_FILE_NOT_FOUND" in msg.text else None
         )
-
-        # Собираем сетевые запросы
-        requests = []
-        page.on("request", lambda r: requests.append(r))
-
-        # Кликаем по большой кнопке Play
-        start_click = time.time()
+        page.wait_for_selector(".plyr", timeout=10000)
+        inject_plyr_playing_listener(page)
         page.click(config.SELECTORS["play_button"])
 
-        # Ждём первый .ts сегмент до 30 сек
-        ts_request = None
-        for _ in range(30):
-            for req in requests:
-                if ".m3u8" in req.url or ".ts" in req.url:
-                    print("✅ Видео грузится:", req.url)
-                    if ".ts" in req.url and req.method == "GET":
-                        ts_request = req
-                        break
-            if ts_request:
-                break
-            time.sleep(1)
-
-        if not ts_request:
-            logger.warning("Видео не начало грузиться за 30 сек — пропускаем замер videoStartTime")
-            report["videoStartTime"] = "Не удалось замерить"
-            allure.attach("Видео не загрузилось", name="videoStartTime", attachment_type=allure.attachment_type.TEXT)
-        else:
-            logger.info(f"✅ Началась загрузка видео: {ts_request.url}")
-            video_start_ms = (ts_request.timing.get("startTime", 0) * 1000) - (start_click * 1000)
+        try:
+            page.wait_for_function(
+                "() => window.__videoStartTime !== null",
+                timeout=30000
+            )
+            video_start_ms = page.evaluate("window.__videoStartTime")
             report["videoStartTime"] = round(video_start_ms)
             allure.attach(f"{video_start_ms:.0f} ms", name="videoStartTime", attachment_type=allure.attachment_type.TEXT)
+        except Exception as e:
+            report["videoStartTime"] = "Не удалось измерить"
+            logger.warning(f"Не удалось измерить videoStartTime: {e}")
+            allure.attach("Не удалось измерить", name="videoStartTime", attachment_type=allure.attachment_type.TEXT)
 
     # === Шаг 6: Ожидание попапа оплаты ===
     with allure.step("Дождаться появления попапа оплаты (до 90 сек)"):
         popup_start = time.time()
-        page.wait_for_selector("#dcoverlay:not(.hidden)", timeout=90000)
+        page.wait_for_selector(config.SELECTORS["popup"], timeout=90000)
         popup_time = time.time() - popup_start
         report["popupAppearTime"] = round(popup_time * 1000)
         logger.info(f"✅ Попап появился через {popup_time:.1f} сек")
@@ -146,7 +188,7 @@ def test_user_flow_with_metrics(page):
 
         page.wait_for_selector(config.SELECTORS["payment_iframe"], timeout=15000)
         iframe = page.frame_locator(config.SELECTORS["payment_iframe"])
-        iframe.locator(config.SELECTORS["pay_button_in_iframe"]).click()
+        iframe.locator(config.SELECTORS["pay_button_bank_card"]).wait_for(state="visible")
         iframe.locator(config.SELECTORS["pay_button_bank_card"]).click()
         iframe.locator(config.SELECTORS["pay_form_bank_card"]).wait_for(state="visible")
 

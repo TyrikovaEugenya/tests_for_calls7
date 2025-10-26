@@ -2,11 +2,14 @@ import pytest
 from playwright.sync_api import sync_playwright
 import allure
 
+CHROMIUM_PATH = "/opt/chromium/chrome"
+
 @pytest.fixture(scope='function')
 def page():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=False,  # обязательно False для user gesture
+            executable_path=CHROMIUM_PATH,
             args=[
                 "--disable-blink-features=AutomationControlled",
             ],
