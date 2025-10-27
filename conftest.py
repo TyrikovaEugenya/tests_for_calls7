@@ -4,6 +4,14 @@ import allure
 
 CHROMIUM_PATH = "/opt/chromium/chrome"
 
+def pytest_addoption(parser):
+    parser.addoption('--film_url', action='store', default="https://calls7.com/movie/370",
+                     help="Choose url for film which page you want to test")
+    
+@pytest.fixture()
+def get_film_url(request):
+    return request.config.getoption("--film_url")
+
 @pytest.fixture(scope='function')
 def page():
     with sync_playwright() as p:

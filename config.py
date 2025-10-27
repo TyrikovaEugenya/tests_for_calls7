@@ -75,7 +75,11 @@ def calculate_page_performance_index(lcp, fid, cls, tbt, ttfb):
     tbt_score = norm(tbt, 200, 600)
     ttfb_score = norm(ttfb, 200, 600)
 
-    weights = {"lcp": 0.25, "fid": 0.15, "cls": 0.15, "tbt": 0.25, "ttfb": 0.20}
+    if lcp == 0:
+        weights = {"lcp": 0, "fid": 0.2, "cls": 0.2, "tbt": 0.4, "ttfb": 0.2}
+    else:
+        weights = {"lcp": 0.25, "fid": 0.15, "cls": 0.15, "tbt": 0.25, "ttfb": 0.20}
+        
     index = (
         weights["lcp"] * lcp_score +
         weights["fid"] * fid_score +
