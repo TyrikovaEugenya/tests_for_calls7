@@ -41,7 +41,7 @@ def page():
                 get: () => undefined
             });
         """)
-
+        context.clear_cookies()
         page = context.new_page()
         yield page
         context.close()
