@@ -1,6 +1,7 @@
 from playwright.sync_api import sync_playwright
 import time
 
+# ДНС метрики
 
 def collect_network_metrics(page):
     target_domain = "calls7.com"
@@ -23,6 +24,10 @@ def collect_network_metrics(page):
             if timing:
                 dns = max(0, timing.get("dnsEnd", 0) - timing.get("dnsStart", 0))
                 connect = max(0, timing.get("connectEnd", 0) - timing.get("connectStart", 0))
+                # if dns == 0:
+                #     dns = "Не измеряется, возможно закешировано"
+                # if connect == 0:
+                #     connect = "Не измеряется, возможно закешировано"
                 ttfb = max(0, timing.get("sendEnd", 0) - (timing.get("requestTime", 0) * 1000))
                 result.update({
                     "dnsResolveTime": dns,
@@ -36,6 +41,8 @@ def collect_network_metrics(page):
 
     return result
 
+
+# Lighthouse метрики
 
 def collect_performance_metrics(page):
     """Собирает Lighthouse-подобные метрики через Performance API"""
@@ -84,6 +91,8 @@ def collect_performance_metrics_after_video(page):
             return { lcp, ttfb, cls, fid, tbt };
         }
     """)
+
+# Замер метрик плеера
 
 def inject_plyr_playing_listener(page):
     page.evaluate("""

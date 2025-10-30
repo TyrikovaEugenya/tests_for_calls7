@@ -1,6 +1,5 @@
 # === Основные URL ===
 BASE_URL = "https://calls7.com"
-FILM_EXAMPLE_URL = "https://calls7.com/movie/370"  # актуальный рабочий URL
 
 SELECTORS = {
     "film_card": "a[href*='/chernyy-zamok/']",
@@ -51,6 +50,7 @@ DEVICES = {
 
 # === Отчёт ===
 REPORT_OUTPUT = "report.json"
+ENRICHED_REPORT_OUTPUT = "enriched_report.json"
 
 # === Рассчет по формуле ===
 def calculate_page_performance_index(lcp, fid, cls, tbt, ttfb):

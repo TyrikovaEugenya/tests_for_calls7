@@ -5,7 +5,9 @@ import json
 import logging
 import os
 import config
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 import utils.metrics as metrics
+from utils.report_builder import build_enriched_report
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -25,8 +27,12 @@ def test_user_flow_with_metrics(page, get_film_url):
         "steps": {},
         "metrics": {},
         "pagePerformanceIndex": None,
+        "playerInitTime": None,
         "videoStartTime": None,
-        "popupAppearTime": None
+        "popupAppearTime": None,
+        "popupAvailable": True,
+        "popupClickSuccess": True,
+        "buttonsCpAvailable": True
     }
 
     with allure.step("Открыть главную и собрать метрики"):
@@ -38,17 +44,21 @@ def test_user_flow_with_metrics(page, get_film_url):
             "dnsResolveTime": dns_metrics["dnsResolveTime"],
             "connectTime": dns_metrics["connectTime"]
         }
+        allure.attach(json.dumps(report["metrics"], indent=2), name="MainPage Metrics", attachment_type=allure.attachment_type.JSON)
         
-    with allure.step("Перейти на страницу фильма"):
+    with allure.step("Перейти на страницу фильма и дождаться появления плеера"):
         dns_metrics = metrics.collect_network_metrics(page)
         page.goto(get_film_url)
-        page.wait_for_load_state("networkidle")
+        player_start = time.time()
+        page.wait_for_selector("video", timeout=15000)
+        player_end = round((time.time() - player_start) * 1000)
+        report["playerInitTime"] = player_end
+
 
     with allure.step("Инжектировать слушатель буферизации"):
+        page.wait_for_load_state("networkidle")
         metrics.inject_hls_buffering_listener(page)
         
-    with allure.step("Дождаться появления элемента <video>"):
-        page.wait_for_selector("video", timeout=15000)
 
     with allure.step("Собрать метрики страницы фильма"):
         
@@ -99,26 +109,79 @@ def test_user_flow_with_metrics(page, get_film_url):
         report["rebufferCount"] = rebuffer_count
         report["rebufferDuration"] = round(rebuffer_duration)
 
-    with allure.step("Дождаться появления попапа оплаты (до 90 сек)"):
-        popup_start = time.time()
-        page.wait_for_selector(config.SELECTORS["popup"], timeout=90000)
-        popup_time = time.time() - popup_start
-        report["popupAppearTime"] = round(popup_time * 1000)
-        logger.info(f"✅ Попап появился через {popup_time:.1f} сек")
-
-    with allure.step("Перейти на страницу оплаты и открыть форму карты"):
-        with page.expect_navigation():
-            page.click(config.SELECTORS["popup_cta"])
-
+    with allure.step("Дождаться появления попапа оплаты и проверить кликабельность"):
+        try:
+            popup_start = time.time()
+            popup_locator = page.locator(config.SELECTORS["popup"])
+            popup_locator.wait_for(state="visible", timeout=90000)
+            popup_time = time.time() - popup_start
+            report["popupAppearTime"] = round(popup_time * 1000)
+            if popup_locator.is_visible() and popup_locator.is_enabled():
+                popup_available = True
+                try:
+                    popup_locator.click(timeout=5000)
+                    popup_click_success = True
+                except PlaywrightTimeoutError:
+                    logger.warning("Попап виден, но клик не прошёл (возможно, перекрыт или не интерактивен)")
+                    popup_click_success = False
+            else:
+                popup_available = False
+        
+        except PlaywrightTimeoutError:
+            logger.error("Попап не появился в течение 90 секунд")
+            popup_available = False
+            popup_click_success = False
+            
+        report["popupAvailable"] = popup_available
+        report["popupClickSuccess"] = popup_click_success
+                    
+        
+    with allure.step("Дождаться появления iframe и замерить время"):
+        iframe_start = time.time()
         page.wait_for_selector(config.SELECTORS["payment_iframe"], timeout=15000)
         iframe = page.frame_locator(config.SELECTORS["payment_iframe"])
-        iframe.locator(config.SELECTORS["pay_button_bank_card"]).wait_for(state="visible")
+        iframe_load_time_ms = round((time.time() - iframe_start) * 1000)
+        report["iframeCpLoadTime"] = iframe_load_time_ms
+        allure.attach(f"{iframe_load_time_ms} ms", name="iframeCpLoadTime", attachment_type=allure.attachment_type.TEXT)
+
+    with allure.step("Нажать на кнопку оплаты и дождаться появления формы, измерить доступность кнопок"):
+        try:
+            bank_card_button = iframe.locator(config.SELECTORS["pay_button_bank_card"])
+            bank_card_button.wait_for(state="visible", timeout=15000)
+            if bank_card_button.is_visible() and bank_card_button.is_enabled():
+                buttons_cp_available = True
+            else:
+                buttons_cp_available = False
+        except Exception as e:
+            logger.error(f"Ошибка при проверке кнопок оплаты: {e}")
+            buttons_cp_available = False
+            
+        report["buttonsCpAvailable"] = buttons_cp_available
         iframe.locator(config.SELECTORS["pay_button_bank_card"]).click()
         iframe.locator(config.SELECTORS["pay_form_bank_card"]).wait_for(state="visible")
 
+    geo = "Moscow"          # или из фикстуры --geo
+    device = "Desktop"      # или из --device
+    network = "Slow 4G"     # или из --throttling
+
+    enriched = build_enriched_report(
+        raw_data=report,
+        geo=geo,
+        device=device,
+        network=network,
+        target_ppi=config.TARGET_PAGE_PERFORMANCE_INDEX
+    )
+
     # === Сохранение отчёта ===
-    save_json_report(report)
+    with open("reports/user_flow_report_raw.json", "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    with open("reports/user_flow_report.json", "w", encoding="utf-8") as f:
+        json.dump(enriched, f, indent=2, ensure_ascii=False)
+        
+    allure.attach.file("reports/user_flow_report_raw.json", name="JSON Report", extension=".json")
     allure.attach.file("reports/user_flow_report.json", name="Full JSON Report", extension=".json")
+    
 
     # === Проверка порога производительности ===
     assert report["pagePerformanceIndex"] >= config.TARGET_PAGE_PERFORMANCE_INDEX, \
