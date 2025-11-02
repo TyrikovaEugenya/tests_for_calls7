@@ -16,10 +16,13 @@ def get_film_url(request):
 def page():
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=False,  # обязательно False для user gesture
+            headless=True,  # обязательно False для user gesture
             executable_path=CHROMIUM_PATH,
             args=[
-                "--disable-blink-features=AutomationControlled",
+                "--remote-debugging-port=9222",
+                "--no-sandbox",
+                "--disable-gpu",
+                "--disable-dev-shm-usage"
             ],
         )
         context = browser.new_context(

@@ -1,6 +1,8 @@
 # === Основные URL ===
 BASE_URL = "https://calls7.com"
 
+CHROMIUM_PATH = "/home/eugene/.cache/ms-playwright/chromium-1187/chrome-linux/chrome"
+
 SELECTORS = {
     "film_card": "a[href*='/chernyy-zamok/']",
     "play_button": ".plyr__control--overlaid",
@@ -53,38 +55,74 @@ REPORT_OUTPUT = "report.json"
 ENRICHED_REPORT_OUTPUT = "enriched_report.json"
 
 # === Рассчет по формуле ===
-def calculate_page_performance_index(lcp, fid, cls, tbt, ttfb):
-    """Рассчитывает сводный индекс производительности от 0 до 100"""
-    def norm(val, good, poor, reverse=False):
-        if reverse:  # чем меньше, тем лучше (например, CLS)
-            if val <= good:
-                return 100
-            elif val >= poor:
-                return 0
-            return 100 - (val - good) * 100 / (poor - good)
-        else:  # чем больше, тем хуже (например, LCP)
-            if val <= good:
-                return 100
-            elif val >= poor:
-                return 0
-            return 100 - (val - good) * 100 / (poor - good)
+def calculate_page_performance_index(
+    lcp: float = None,
+    fid: float = None,
+    cls: float = None,
+    tbt: float = None,
+    ttfb: float = None,
+    target_weights: dict = METRIC_WEIGHTS
+) -> float:
+    """
+    Рассчитывает pagePerformanceIndex от 0 до 100.
+    Все входные метрики — в миллисекундах (кроме CLS — безразмерный).
+    None означает "метрика не измерена" → исключается из расчёта.
+    """
+    # Пороги: (good, poor) в мс (CLS — в долях)
+    thresholds = {
+        "lcp": (1250, 4000),
+        "fid": (100, 300),
+        "cls": (0.1, 0.25),
+        "tbt": (200, 600),
+        "ttfb": (200, 600)
+    }
 
-    lcp_score = norm(lcp, 1250, 4000)
-    fid_score = norm(fid, 100, 300)
-    cls_score = norm(cls, 0.1, 0.25, reverse=True)
-    tbt_score = norm(tbt, 200, 600)
-    ttfb_score = norm(ttfb, 200, 600)
+    def score(value, good, poor):
+        if value is None or value <= 0:
+            return None
+        if value <= good:
+            return 100.0
+        if value >= poor:
+            return 0.0
+        return 100.0 - (value - good) * 100.0 / (poor - good)
 
-    if lcp == 0:
-        weights = {"lcp": 0, "fid": 0.2, "cls": 0.2, "tbt": 0.4, "ttfb": 0.2}
-    else:
-        weights = {"lcp": 0.25, "fid": 0.15, "cls": 0.15, "tbt": 0.25, "ttfb": 0.20}
-        
-    index = (
-        weights["lcp"] * lcp_score +
-        weights["fid"] * fid_score +
-        weights["cls"] * cls_score +
-        weights["tbt"] * tbt_score +
-        weights["ttfb"] * ttfb_score
+    raw_scores = {
+        "lcp": score(lcp, *thresholds["lcp"]) if lcp is not None else None,
+        "fid": score(fid, *thresholds["fid"]) if fid is not None else None,
+        "cls": score(cls, *thresholds["cls"]) if cls is not None else None,
+        "tbt": score(tbt, *thresholds["tbt"]) if tbt is not None else None,
+        "ttfb": score(ttfb, *thresholds["ttfb"]) if ttfb is not None else None,
+    }
+
+    # Убираем None-значения
+    available_scores = {k: v for k, v in raw_scores.items() if v is not None}
+
+    if not available_scores:
+        return 100.0  # или raise ValueError?
+
+    # Базовые веса
+    if target_weights is None:
+        target_weights = {
+            "lcp": 0.25,
+            "fid": 0.15,
+            "cls": 0.15,
+            "tbt": 0.25,
+            "ttfb": 0.20
+        }
+
+    # Фильтруем веса по доступным метрикам
+    active_weights = {k: v for k, v in target_weights.items() if k in available_scores}
+    total_weight = sum(active_weights.values())
+
+    if total_weight == 0:
+        return 100.0
+
+    # Нормализуем веса
+    normalized_weights = {k: v / total_weight for k, v in active_weights.items()}
+
+    index = sum(
+        normalized_weights[k] * available_scores[k]
+        for k in available_scores
     )
+
     return round(index, 1)

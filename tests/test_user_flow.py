@@ -8,6 +8,7 @@ import config
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 import utils.metrics as metrics
 from utils.report_builder import build_enriched_report
+from utils.lighthouse_runner import run_lighthouse_for_url, extract_metrics_from_lighthouse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -34,10 +35,41 @@ def test_user_flow_with_metrics(page, get_film_url):
         "popupClickSuccess": True,
         "buttonsCpAvailable": True
     }
+    
+    # with allure.step("Собрать Lighthouse-метрики для главной страницы"):
+    #     try:
+    #         lh_report = run_lighthouse_for_url(config.BASE_URL)
+    #         lh_metrics = extract_metrics_from_lighthouse(lh_report)
+
+    #         # Сохраняем в общий отчёт
+    #         report["metrics"] = lh_metrics
+
+    #         # Вычисляем индекс
+    #         ppi = config.calculate_page_performance_index(
+    #             lcp=lh_metrics.get("lcp"),
+    #             cls=lh_metrics.get("cls"),
+    #             tbt=lh_metrics.get("tbt"),
+    #             ttfb=lh_metrics.get("ttfb"),
+    #             fid=lh_metrics.get("inp")  # используем INP как замену FID
+    #         )
+    #         report["pagePerformanceIndex"] = ppi
+    #         report["is_problematic"] = ppi < config.TARGET_PAGE_PERFORMANCE_INDEX
+
+    #         # Прикрепляем к Allure
+    #         allure.attach(json.dumps(lh_metrics, indent=2, ensure_ascii=False), name="Lighthouse Metrics", attachment_type=allure.attachment_type.JSON)
+    #         allure.attach(f"pagePerformanceIndex: {ppi}\nTarget: {config.TARGET_PAGE_PERFORMANCE_INDEX}", name="Performance Index", attachment_type=allure.attachment_type.TEXT)
+
+    #         logger.info(f"Lighthouse метрики собраны. PPI: {ppi}")
+
+    #     except Exception as e:
+    #         logger.error(f"Ошибка при сборе Lighthouse-метрик: {e}")
+    #         allure.attach(str(e), name="Lighthouse Error", attachment_type=allure.attachment_type.TEXT)
+    #         raise
 
     with allure.step("Открыть главную и собрать метрики"):
         dns_metrics = metrics.collect_network_metrics(page)
         page.goto(config.BASE_URL)
+        page.wait_for_load_state("networkidle")
         perf_main = metrics.collect_performance_metrics(page)
         report["steps"]["main_page"] = {
             **perf_main,
@@ -62,7 +94,7 @@ def test_user_flow_with_metrics(page, get_film_url):
 
     with allure.step("Собрать метрики страницы фильма"):
         
-        perf_film = metrics.collect_performance_metrics_after_video(page)
+        perf_film = metrics.collect_performance_metrics(page)
         report["steps"]["film_page"] = {
             **perf_film,
             "dnsResolveTime": dns_metrics["dnsResolveTime"],

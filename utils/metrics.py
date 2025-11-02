@@ -3,8 +3,7 @@ import time
 
 # ДНС метрики
 
-def collect_network_metrics(page):
-    target_domain = "calls7.com"
+def collect_network_metrics(page, target_domain = "calls7.com"):
     client = page.context.new_cdp_session(page)
     client.send("Network.enable")
 
@@ -24,10 +23,6 @@ def collect_network_metrics(page):
             if timing:
                 dns = max(0, timing.get("dnsEnd", 0) - timing.get("dnsStart", 0))
                 connect = max(0, timing.get("connectEnd", 0) - timing.get("connectStart", 0))
-                # if dns == 0:
-                #     dns = "Не измеряется, возможно закешировано"
-                # if connect == 0:
-                #     connect = "Не измеряется, возможно закешировано"
                 ttfb = max(0, timing.get("sendEnd", 0) - (timing.get("requestTime", 0) * 1000))
                 result.update({
                     "dnsResolveTime": dns,
@@ -46,51 +41,61 @@ def collect_network_metrics(page):
 
 def collect_performance_metrics(page):
     """Собирает Lighthouse-подобные метрики через Performance API"""
+    
     metrics = page.evaluate("""
-        () => {
-            const entries = performance.getEntriesByType('navigation')[0];
-            const lcpEntry = performance.getEntriesByName('largest-contentful-paint')[0];
-            const lcp = lcpEntry ? lcpEntry.startTime : 0;
-            const ttfb = entries ? entries.responseStart - entries.requestStart : 0;
-            const cls = 0;
-            const fid = 0;
-            let tbt = 0;
-            const longTasks = performance.getEntriesByType('longtask');
-            if (longTasks) {
-                tbt = longTasks.reduce((sum, task) => sum + task.duration, 0);
+            () => {
+                const entries = performance.getEntriesByType('navigation')[0];
+                const lcpEntry = performance.getEntriesByName('largest-contentful-paint')[0];
+                const lcp = lcpEntry ? lcpEntry.startTime : 0;
+                const ttfb = entries ? entries.responseStart - entries.requestStart : 0;
+                const cls = performance.getEntriesByType('layout-shift').reduce(
+                        (sum, entry) => sum + (entry.hadRecentInput ? 0 : entry.value), 0
+                );
+                const fid = null;
+                let tbt = null;
+                const longTasks = performance.getEntriesByType('longtask');
+                if (longTasks) {
+                    tbt = longTasks.reduce((sum, task) => sum + task.duration, 0);
+                }
+                return {
+                        ttfb: entries ? ttfb : null,
+                        lcp: lcp ? lcp.renderTime || lcp.loadTime : null,
+                        cls: cls || 0,
+                        fid: null,  // FID требует реального взаимодействия
+                        tbt: tbt > 0 ? tbt : null
+                };
             }
-            return { lcp, ttfb, cls, fid, tbt };
-        }
-    """)
+        """)
     return metrics
 
-def collect_performance_metrics_after_video(page):
-    """
-    Ждёт появления <video>, затем измеряет LCP и другие метрики.
-    Используется для страниц фильмов.
-    """
 
-    return page.evaluate("""
-        () => {
-            const start = performance.now();
-            let lcpEntry = performance.getEntriesByName('largest-contentful-paint')[0];
-            while (!lcpEntry && (performance.now() - start) < 5000) {
-                lcpEntry = performance.getEntriesByName('largest-contentful-paint')[0];
-            }
+# def collect_performance_metrics_after_video(page):
+#     """
+#     Ждёт появления <video>, затем измеряет LCP и другие метрики.
+#     Используется для страниц фильмов.
+#     """
 
-            const nav = performance.getEntriesByType('navigation')[0];
-            const lcp = lcpEntry ? lcpEntry.startTime : 0;
-            const ttfb = nav ? nav.responseStart - nav.requestStart : 0;
-            const cls = 0;
-            const fid = 0;
-            let tbt = 0;
-            const longTasks = performance.getEntriesByType('longtask');
-            if (longTasks) {
-                tbt = longTasks.reduce((sum, task) => sum + task.duration, 0);
-            }
-            return { lcp, ttfb, cls, fid, tbt };
-        }
-    """)
+#     return page.evaluate("""
+#         () => {
+#             const start = performance.now();
+#             let lcpEntry = performance.getEntriesByName('largest-contentful-paint')[0];
+#             while (!lcpEntry && (performance.now() - start) < 5000) {
+#                 lcpEntry = performance.getEntriesByName('largest-contentful-paint')[0];
+#             }
+
+#             const nav = performance.getEntriesByType('navigation')[0];
+#             const lcp = lcpEntry ? lcpEntry.startTime : 0;
+#             const ttfb = nav ? nav.responseStart - nav.requestStart : 0;
+#             const cls = 0;
+#             const fid = 0;
+#             let tbt = 0;
+#             const longTasks = performance.getEntriesByType('longtask');
+#             if (longTasks) {
+#                 tbt = longTasks.reduce((sum, task) => sum + task.duration, 0);
+#             }
+#             return { lcp, ttfb, cls, fid, tbt };
+#         }
+#     """)
 
 # Замер метрик плеера
 
