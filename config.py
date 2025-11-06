@@ -27,6 +27,16 @@ METRIC_WEIGHTS = {
     "ttfb": 0.20,
 }
 
+METRIC_THRESHOLDS = {
+    "lcp": (2500, 4000),
+    "fcp": (1800, 3000),
+    "tbt": (200, 600),
+    "ttfb": (600, 1000),
+    "inp": (200, 500),
+    "videoStartTime": (3000, 10000),
+    "iframeCpLoadTime": (2000, 4000),
+}
+
 # === Сетевые профили ===
 THROTTLING_PROFILES = {
     "No throttling": None,

@@ -1,5 +1,16 @@
+import config
+import re
 
-def _get_metric_rating(value, metric_name):
+def sanitize_filename(name: str, max_length: int = 50) -> str:
+    """Преобразует строку в безопасное имя файла."""
+    # Удаляем/заменяем недопустимые символы
+    sanitized = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
+    # Убираем лишние подчёркивания и пробелы по краям
+    sanitized = re.sub(r'[_\s]+', '_', sanitized).strip('_')
+    # Ограничиваем длину
+    return sanitized[:max_length]
+
+def _get_metric_rating(value, metric_name, thresholds = config.METRIC_THRESHOLDS):
     """Возвращает оценку (✅/⚠️/❌) и текстовую метку."""
     if value is None:
         return "❓", "не измерено"
@@ -10,15 +21,6 @@ def _get_metric_rating(value, metric_name):
         if metric_name in ("dnsResolveTime", "connectTime"):
             return "ℹ️", "кэшировано"
 
-    thresholds = {
-        "lcp": (2500, 4000),
-        "fcp": (1800, 3000),
-        "tbt": (200, 600),
-        "ttfb": (600, 1000),
-        "inp": (200, 500),
-        "videoStartTime": (3000, 10000),
-        "iframeCpLoadTime": (2000, 4000),
-    }
 
     if metric_name in thresholds:
         good, poor = thresholds[metric_name]
@@ -40,7 +42,7 @@ def _get_metric_rating(value, metric_name):
     return "ℹ️", "без оценки"
 
 
-def explain_metric_value(value: Any, metric_name: str) -> str:
+def explain_metric_value(value, metric_name: str) -> str:
     """Пояснение + оценка."""
     if value is None:
         if metric_name == "inp":

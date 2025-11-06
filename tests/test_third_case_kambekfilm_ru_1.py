@@ -8,61 +8,25 @@ import os
 import config
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 import utils.metrics as metrics
-from utils.report_builder import build_enriched_report
+from utils.report_explainer import generate_human_readable_report, sanitize_filename
 from utils.lighthouse_runner import run_lighthouse_for_url, extract_metrics_from_lighthouse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-@allure.title("Полный user flow: от главной до формы оплаты")
+@allure.title("Третий сценарий: страница https://kambekfilm.ru/1")
 @allure.severity(allure.severity_level.CRITICAL)
-def test_user_flow_with_metrics(page, get_film_url):
+def test_third_case(page, get_film_url):
     report = {
-        "test_name": "test_user_flow_with_metrics",
+        "test_name": "test_third_case",
         "film_url": get_film_url,
         "steps": {},
         "is_problematic_flow": False,
     }
     
-    with allure.step(f"Переходим на главную страницу {config.BASE_URL}"):
-        try:
-            dns_metrics = metrics.collect_network_metrics(page)
-            page.goto(config.BASE_URL)
-            page.wait_for_load_state("networkidle")
-            lh_report = run_lighthouse_for_url(config.BASE_URL)
-            lh_metrics = extract_metrics_from_lighthouse(lh_report)
-            
-            ppi = config.calculate_page_performance_index(
-                lcp=lh_metrics.get("lcp"),
-                cls=lh_metrics.get("cls"),
-                tbt=lh_metrics.get("tbt"),
-                ttfb=lh_metrics.get("ttfb"),
-                fid=lh_metrics.get("inp")  # используем INP как замену FID
-            )
-            
-            report["steps"]["main_page"] = {
-                **lh_metrics,
-                "dnsResolveTime": dns_metrics["dnsResolveTime"],
-                "connectTime": dns_metrics["connectTime"],
-                "pagePerformanceIndex": ppi,
-                "is_problematic_page": ppi < config.TARGET_PAGE_PERFORMANCE_INDEX
-            }
-            
-            if report["steps"]["main_page"]["is_problematic_page"] is True:
-                report["is_problematic_flow"] = True
-
-            allure.attach(json.dumps(report["steps"]["main_page"], indent=2), name="MainPage Metrics", attachment_type=allure.attachment_type.JSON)
-            allure.attach(f"pagePerformanceIndex: {ppi}\nTarget: {config.TARGET_PAGE_PERFORMANCE_INDEX}", name="Performance Index", attachment_type=allure.attachment_type.TEXT)
-        except Exception as e:
-            logger.error(f"Ошибка при сборе метрик главной странице: {e}")
-            allure.attach(str(e), name="Mainpage Error", attachment_type=allure.attachment_type.TEXT)
-            raise
-        
-
-    # === Шаг 1: Сбор Lighthouse-метрик для страницы фильма ===
     with allure.step(f"Переходим на страницу фильма и собираем метрики для {get_film_url}"):
         try:
-            dns_metrics = metrics.collect_network_metrics(page)
+            dns_metrics = metrics.collect_network_metrics(page, target_domain="kambekfilm.ru")
             page.goto(get_film_url)
             player_start = time.time()
             page.wait_for_selector("video", timeout=15000)
@@ -181,32 +145,16 @@ def test_user_flow_with_metrics(page, get_film_url):
             iframe = page.frame_locator(config.SELECTORS["payment_iframe"])
             
             page.wait_for_load_state("networkidle")
-            # lh_report = run_lighthouse_for_url(page.url)
-            # lh_metrics = extract_metrics_from_lighthouse(lh_report)
-            
-            # ppi = config.calculate_page_performance_index(
-            #     lcp=lh_metrics.get("lcp"),
-            #     cls=lh_metrics.get("cls"),
-            #     tbt=lh_metrics.get("tbt"),
-            #     ttfb=lh_metrics.get("ttfb"),
-            #     fid=lh_metrics.get("inp")  # используем INP как замену FID
-            # )
             
             report["steps"]["pay_page"] = {
-                #**lh_metrics,
                 "dnsResolveTime": dns_metrics["dnsResolveTime"],
                 "connectTime": dns_metrics["connectTime"],
-                # "pagePerformanceIndex": ppi,
-                # "is_problematic_page": ppi < config.TARGET_PAGE_PERFORMANCE_INDEX,
                 "iframeCpLoadTime": iframe_load_time_ms
             }
             
-            # if report["steps"]["pay_page"]["is_problematic_page"] is True:
-            #     report["is_problematic_flow"] = True
-    
             allure.attach(f"{iframe_load_time_ms} ms", name="iframeCpLoadTime", attachment_type=allure.attachment_type.TEXT)
             allure.attach(json.dumps(report["steps"]["pay_page"], indent=2), name="PayPage Metrics", attachment_type=allure.attachment_type.JSON)
-            # allure.attach(f"pagePerformanceIndex: {ppi}\nTarget: {config.TARGET_PAGE_PERFORMANCE_INDEX}", name="Performance Index", attachment_type=allure.attachment_type.TEXT)
+
         except Exception as e:
             logger.error(f"Ошибка на странице оплаты: {e}")
             allure.attach(str(e), name="PaymentPage Error", attachment_type=allure.attachment_type.TEXT)
@@ -251,7 +199,22 @@ def test_user_flow_with_metrics(page, get_film_url):
     # === Сохранение финального отчёта ===
     with allure.step("Сохранить сводный отчёт"):
         Path("reports").mkdir(exist_ok=True)
-        report_path = f"reports/report_test_user_flow_with_metrics_{get_film_url}.json"
+        safe_url = sanitize_filename(get_film_url)
+        report_path = f"reports/report_test_user_flow_with_metrics_{safe_url}.json"
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, ensure_ascii=False)
         allure.attach.file(report_path, name="Сводный JSON-отчёт", extension="json")
+
+        human_readable_report = generate_human_readable_report(report=report)
+        md_path = f"reports/report_{safe_url}_human.md"
+
+        # Сохраняем
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(human_readable_report)
+
+        # Прикрепляем к Allure
+        allure.attach.file(
+            str(md_path),
+            name="Человекочитаемый отчёт",
+            extension="md"
+        )

@@ -14,53 +14,19 @@ from utils.lighthouse_runner import run_lighthouse_for_url, extract_metrics_from
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-@allure.title("Полный user flow: от главной до формы оплаты")
+@allure.title("Второй сценарий: страница https://avgustk.ru/Dol")
 @allure.severity(allure.severity_level.CRITICAL)
-def test_user_flow_with_metrics(page, get_film_url):
+def test_second_case(page, get_film_url):
     report = {
-        "test_name": "test_user_flow_with_metrics",
+        "test_name": "test_second_case",
         "film_url": get_film_url,
         "steps": {},
         "is_problematic_flow": False,
     }
     
-    with allure.step(f"Переходим на главную страницу {config.BASE_URL}"):
-        try:
-            dns_metrics = metrics.collect_network_metrics(page)
-            page.goto(config.BASE_URL)
-            page.wait_for_load_state("networkidle")
-            lh_report = run_lighthouse_for_url(config.BASE_URL)
-            lh_metrics = extract_metrics_from_lighthouse(lh_report)
-            
-            ppi = config.calculate_page_performance_index(
-                lcp=lh_metrics.get("lcp"),
-                cls=lh_metrics.get("cls"),
-                tbt=lh_metrics.get("tbt"),
-                ttfb=lh_metrics.get("ttfb"),
-                fid=lh_metrics.get("inp")  # используем INP как замену FID
-            )
-            
-            report["steps"]["main_page"] = {
-                **lh_metrics,
-                "dnsResolveTime": dns_metrics["dnsResolveTime"],
-                "connectTime": dns_metrics["connectTime"],
-                "pagePerformanceIndex": ppi,
-                "is_problematic_page": ppi < config.TARGET_PAGE_PERFORMANCE_INDEX
-            }
-            
-            if report["steps"]["main_page"]["is_problematic_page"] is True:
-                report["is_problematic_flow"] = True
-
-            allure.attach(json.dumps(report["steps"]["main_page"], indent=2), name="MainPage Metrics", attachment_type=allure.attachment_type.JSON)
-            allure.attach(f"pagePerformanceIndex: {ppi}\nTarget: {config.TARGET_PAGE_PERFORMANCE_INDEX}", name="Performance Index", attachment_type=allure.attachment_type.TEXT)
-        except Exception as e:
-            logger.error(f"Ошибка при сборе метрик главной странице: {e}")
-            allure.attach(str(e), name="Mainpage Error", attachment_type=allure.attachment_type.TEXT)
-            raise
-        
     with allure.step(f"Переходим на страницу фильма и собираем метрики для {get_film_url}"):
         try:
-            dns_metrics = metrics.collect_network_metrics(page)
+            dns_metrics = metrics.collect_network_metrics(page, target_domain="avgustk.ru")
             page.goto(get_film_url)
             player_start = time.time()
             page.wait_for_selector("video", timeout=15000)
