@@ -16,10 +16,14 @@ logger = logging.getLogger(__name__)
 
 @allure.title("Третий сценарий: страница https://kambekfilm.ru/1")
 @allure.severity(allure.severity_level.CRITICAL)
-def test_third_case(page, get_film_url):
+def test_third_case(page, get_film_url, device, throttling, geo, browser_type):
     report = {
         "test_name": "test_third_case",
         "film_url": get_film_url,
+        "device": device,
+        "throttling": throttling,
+        "geoposition": geo,
+        "browser_type": browser_type,
         "steps": {},
         "is_problematic_flow": False,
     }

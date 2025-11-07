@@ -16,10 +16,14 @@ logger = logging.getLogger(__name__)
 
 @allure.title("Полный user flow: от главной до формы оплаты")
 @allure.severity(allure.severity_level.CRITICAL)
-def test_user_flow_with_metrics(page, get_film_url):
+def test_user_flow_with_metrics(page, get_film_url, device, throttling, geo, browser_type):
     report = {
         "test_name": "test_user_flow_with_metrics",
         "film_url": get_film_url,
+        "device": device,
+        "throttling": throttling,
+        "geoposition": geo,
+        "browser_type": browser_type,
         "steps": {},
         "is_problematic_flow": False,
     }
