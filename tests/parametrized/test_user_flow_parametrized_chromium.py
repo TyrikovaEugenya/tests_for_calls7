@@ -8,17 +8,23 @@ import os
 import config
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 import utils.metrics as metrics
-from utils.report_explainer import generate_human_readable_report, sanitize_filename
+from utils.report_explainer import sanitize_filename
 from utils.lighthouse_runner import run_lighthouse_for_url, extract_metrics_from_lighthouse
+from utils.report_aggregator import log_issues_if_any
+from conftest import attach_report_to_test
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-@allure.title("Полный user flow: от главной до формы оплаты")
+@pytest.mark.parametrize("device", config.DEVICES)
+@pytest.mark.parametrize("throttling", config.THROTTLING_MODES)
+@pytest.mark.parametrize("geo", config.GEO_LOCATIONS)
+@pytest.mark.parametrize("browser_type", ["chromium"], scope="session")
+@allure.title("Полный user flow: от главной до формы оплаты  только в chromium")
 @allure.severity(allure.severity_level.CRITICAL)
-def test_user_flow_with_metrics(page, get_film_url, device, throttling, geo, browser_type):
+def test_user_flow_parametrized_only_chromium(page, get_film_url, device, throttling, geo, browser_type, request):
     report = {
-        "test_name": "test_user_flow_with_metrics",
+        "test_name": "test_user_flow_with_metrics_only_chromium",
         "film_url": get_film_url,
         "device": device,
         "throttling": throttling,
@@ -37,7 +43,13 @@ def test_user_flow_with_metrics(page, get_film_url, device, throttling, geo, bro
             dns_metrics = metrics.collect_network_metrics(page)
             page.goto(config.BASE_URL)
             page.wait_for_load_state("networkidle")
-            lh_report = run_lighthouse_for_url(config.BASE_URL)
+            try:
+                lh_report = run_lighthouse_for_url(config.BASE_URL)
+            except Exception as e:
+                if "timed out" in str(e) or "Timeout" in str(e):
+                    pytest.fail(f"Lighthouse не ответил для {config.BASE_URL}", pytrace=False)
+                else:
+                    raise
             lh_metrics = extract_metrics_from_lighthouse(lh_report)
             
             ppi = config.calculate_page_performance_index(
@@ -61,6 +73,8 @@ def test_user_flow_with_metrics(page, get_film_url, device, throttling, geo, bro
 
             allure.attach(json.dumps(report["steps"]["main_page"], indent=2), name="MainPage Metrics", attachment_type=allure.attachment_type.JSON)
             allure.attach(f"pagePerformanceIndex: {ppi}\nTarget: {config.TARGET_PAGE_PERFORMANCE_INDEX}", name="Performance Index", attachment_type=allure.attachment_type.TEXT)
+        except PlaywrightTimeoutError:
+            pytest.fail(f"Не удалось загрузить {config.BASE_URL}", pytrace=False)
         except Exception as e:
             logger.error(f"Ошибка при сборе метрик главной странице: {e}")
             allure.attach(str(e), name="Mainpage Error", attachment_type=allure.attachment_type.TEXT)
@@ -76,7 +90,13 @@ def test_user_flow_with_metrics(page, get_film_url, device, throttling, geo, bro
             
             page.wait_for_load_state("networkidle")
             metrics.inject_hls_buffering_listener(page)
-            lh_report = run_lighthouse_for_url(get_film_url)
+            try:
+                lh_report = run_lighthouse_for_url(get_film_url)
+            except Exception as e:
+                if "timed out" in str(e) or "Timeout" in str(e):
+                    pytest.fail(f"Lighthouse не ответил для {get_film_url}", pytrace=False)
+                else:
+                    raise
             lh_metrics = extract_metrics_from_lighthouse(lh_report)
             
             ppi = config.calculate_page_performance_index(
@@ -101,6 +121,9 @@ def test_user_flow_with_metrics(page, get_film_url, device, throttling, geo, bro
 
             allure.attach(json.dumps(report["steps"]["film_page"], indent=2), name="FilmPage Metrics", attachment_type=allure.attachment_type.JSON)
             allure.attach(f"pagePerformanceIndex: {ppi}\nTarget: {config.TARGET_PAGE_PERFORMANCE_INDEX}", name="Performance Index", attachment_type=allure.attachment_type.TEXT)
+            
+        except PlaywrightTimeoutError:
+            pytest.fail(f"Не удалось загрузить {get_film_url}", pytrace=False)
         except Exception as e:
             logger.error(f"Ошибка при сборе метрик на странице фильма: {e}")
             allure.attach(str(e), name="FilmPage Error", attachment_type=allure.attachment_type.TEXT)
@@ -120,7 +143,7 @@ def test_user_flow_with_metrics(page, get_film_url, device, throttling, geo, bro
             report["steps"]["film_page"]["videoStartTime"] = video_start_ms
             
             allure.attach(f"videoStartTime: {video_start_ms}", name="videoStartTime", attachment_type=allure.attachment_type.TEXT)
-        except:
+        except Exception as e:
             logger.error(f"Ошибка при сборе метрик плеера на странице фильма: {e}")
             allure.attach(str(e), name="FilmPage player Error", attachment_type=allure.attachment_type.TEXT)
             raise
@@ -148,6 +171,9 @@ def test_user_flow_with_metrics(page, get_film_url, device, throttling, geo, bro
             report["steps"]["film_page"]["popupAppearTime"] = popup_time_ms
             
             allure.attach(f"popupAppearTime: {popup_time_ms}", name="popupAppearTime", attachment_type=allure.attachment_type.TEXT)
+        except PlaywrightTimeoutError:
+            report["steps"]["film_page"]["popupAvailable"] = False
+            pytest.fail("Попап оплаты не появился за 90 секунд", pytrace=False)
         except Exception as e:
             logger.error(f"Ошибка при появления попапа оплаты на странице фильма: {e}")
             allure.attach(str(e), name="FilmPage popup Error", attachment_type=allure.attachment_type.TEXT)
@@ -162,10 +188,11 @@ def test_user_flow_with_metrics(page, get_film_url, device, throttling, geo, bro
                     popup_locator.click(timeout=5000)
                     iframe_start = time.time() # iframe start here!
                     popup_click_success = True
-                except PlaywrightTimeoutError:
+                except PlaywrightTimeoutError as e:
                     logger.warning("Попап виден, но клик не прошёл (возможно, перекрыт или не интерактивен)")
                     allure.attach(str(e), name="FilmPage popup click Error", attachment_type=allure.attachment_type.TEXT)
                     popup_click_success = False
+                    pytest.fail("Клик по попапу не удался (элемент не интерактивен)", pytrace=False)
             else:
                 popup_available = False
         except Exception as e:
@@ -212,10 +239,11 @@ def test_user_flow_with_metrics(page, get_film_url, device, throttling, geo, bro
                 try:
                     bank_card_button.click(timeout=5000)
                     buttons_click_success = True
-                except PlaywrightTimeoutError:
+                except PlaywrightTimeoutError as e:
                     logger.warning("Кнопка видна, но клик не прошёл (возможно, перекрыта или не интерактивена)")
                     buttons_click_success = False
                     allure.attach(str(e), name="PayPage button click Error", attachment_type=allure.attachment_type.TEXT)
+                    pytest.fail("Клик по кнопке оплаты не удался", pytrace=False)
             else:
                 buttons_cp_available = False
         except Exception as e:
@@ -235,30 +263,22 @@ def test_user_flow_with_metrics(page, get_film_url, device, throttling, geo, bro
             logger.error(f"Ошибка появления формы на странице оплаты: {e}")
             allure.attach(str(e), name="PaymentPage form visibility Error", attachment_type=allure.attachment_type.TEXT)
             
-            
+
+    if log_issues_if_any(report):
+        report["is_problematic_flow"] = True
             
 
     # === Сохранение финального отчёта ===
     with allure.step("Сохранить сводный отчёт"):
         Path("reports").mkdir(exist_ok=True)
         safe_url = sanitize_filename(get_film_url)
-        report_path = f"reports/report_test_user_flow_with_metrics_{safe_url}_{device}_{throttling}_{geo}_{browser_type}.json"
+        report_path = f"reports/report_{__name__}_{safe_url}_{device}_{throttling}_{geo}_{browser_type}.json"
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, ensure_ascii=False)
-        allure.attach.file(report_path, name="Сводный JSON-отчёт", extension="json")
-
-        human_readable_report = generate_human_readable_report(report=report)
-        md_path = f"reports/report_{safe_url}_human.md"
-
-        # Сохраняем
-        with open(md_path, "w", encoding="utf-8") as f:
-            f.write(human_readable_report)
-
-        # Прикрепляем к Allure
-        allure.attach.file(
-            str(md_path),
-            name="Человекочитаемый отчёт",
-            extension="md"
-        )
+        allure.attach.file(report_path, name="JSON-отчёт по конкретному запуску", extension="json")
         
+        attach_report_to_test(request, report)
+
+    
     assert report["is_problematic_flow"] == False, "Проблемный запуск"
+    

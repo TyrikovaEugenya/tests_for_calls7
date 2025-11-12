@@ -37,32 +37,13 @@ METRIC_THRESHOLDS = {
     "iframeCpLoadTime": (2000, 4000),
 }
 
-# === Сетевые профили ===
-THROTTLING_PROFILES = {
-    "No throttling": None,
-    "Slow 4G": {
-        "download": 1.5 * 1024 * 1024,   # 1.5 Mbps
-        "upload": 750 * 1024,            # 750 Kbps
-        "latency": 150,                  # ms
-    }
-}
-
-# === Геолокации (пример) ===
-GEO_LOCATIONS = {
-    "Moscow": {"latitude": 55.75, "longitude": 37.62},
-    "Yekaterinburg": {"latitude": 56.85, "longitude": 60.61},
-    "Novosibirsk": {"latitude": 55.01, "longitude": 82.93},
-}
-
-# === Устройства ===
-DEVICES = {
-    "desktop": {"width": 1920, "height": 1080, "is_mobile": False},
-    "mobile": {"width": 390, "height": 844, "is_mobile": True},  # iPhone 12
-}
+DEVICES = ["Desktop", "Mobile"]
+THROTTLING_MODES = ["No_throttling", "Slow_4G"]
+GEO_LOCATIONS = ["Moscow", "SPb", "Kazan", "Novosibirsk", "Yekaterinburg"]
+BROWSERS = ["chromium", "firefox", "webkit"]
 
 # === Отчёт ===
 REPORT_OUTPUT = "report.json"
-ENRICHED_REPORT_OUTPUT = "enriched_report.json"
 
 # === Рассчет по формуле ===
 def calculate_page_performance_index(

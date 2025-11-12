@@ -1,4 +1,5 @@
 import subprocess
+import time
 import json
 import tempfile
 from pathlib import Path
@@ -9,6 +10,21 @@ def run_lighthouse_for_url(url: str, timeout_sec: int = 60) -> dict:
     """Запускает Lighthouse CLI и возвращает JSON-отчёт."""
     with tempfile.TemporaryDirectory() as tmp:
         output = Path(tmp) / "lh_report.json"
+        
+        chrome_proc = subprocess.Popen([
+            config.CHROMIUM_PATH,
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-gpu",
+            "--remote-debugging-port=9222",
+            "--disable-dev-shm-usage",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "about:blank"
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        time.sleep(2)
+
         cmd = [
             "lighthouse",
             url,
@@ -18,9 +34,9 @@ def run_lighthouse_for_url(url: str, timeout_sec: int = 60) -> dict:
             f"--output-path={output}",
             "--quiet",
             f"--chrome-path={chromium_path}",
-            "--chrome-flags=--headless=new --disable-gpu --disable-dev-shm-usage --disable-setuid-sandbox --single-process",
+            #"--chrome-flags=--headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage",
             "--only-categories=performance",
-            "--disable-storage-reset",
+            #"--disable-storage-reset",
             "--throttling-method=provided"  # используем сеть из Playwright (если настроена)
         ]
 
@@ -34,6 +50,9 @@ def run_lighthouse_for_url(url: str, timeout_sec: int = 60) -> dict:
             raise RuntimeError(f"Lighthouse failed: {e.stderr.decode() if e.stderr else 'unknown error'}")
         except Exception as e:
             raise RuntimeError(f"Unexpected error: {e}")
+        finally:
+            chrome_proc.terminate()
+            chrome_proc.wait(timeout=5)
 
 
 def extract_metrics_from_lighthouse(report: dict) -> dict:
