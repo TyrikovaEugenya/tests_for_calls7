@@ -10,7 +10,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 import utils.metrics as metrics
 from utils.report_explainer import sanitize_filename
 from utils.report_aggregator import log_issues_if_any
-from conftest import attach_report_to_test
+# from conftest import attach_report_to_test
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -149,8 +149,6 @@ def test_user_flow_parametrized_firefox_webkit(page, get_film_url, device, throt
             iframe_load_time_ms = round((time.time() - iframe_start) * 1000)
             iframe = page.frame_locator(config.SELECTORS["payment_iframe"])
             
-            page.wait_for_load_state("networkidle")
-            
             report["steps"]["pay_page"] = {
                 "iframeCpLoadTime": iframe_load_time_ms,
             }
@@ -210,7 +208,7 @@ def test_user_flow_parametrized_firefox_webkit(page, get_film_url, device, throt
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, ensure_ascii=False)
         allure.attach.file(report_path, name="JSON-отчёт по конкретному запуску", extension="json")
-
-        attach_report_to_test(request, report)
+        request.node._report_data = report
+        # attach_report_to_test(request, report)
     
     assert report["is_problematic_flow"] == False, "Проблемный запуск"
