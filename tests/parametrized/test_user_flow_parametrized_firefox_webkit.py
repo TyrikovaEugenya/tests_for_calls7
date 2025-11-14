@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 @pytest.mark.parametrize("throttling", ["No_throttling"])
 @pytest.mark.parametrize("geo", config.GEO_LOCATIONS)
 @pytest.mark.parametrize("browser_type", ["firefox", "webkit"], scope="session")
+@allure.story("User Flow: Главная → Фильм → Плеер → Попап → Оплата")
 @allure.title("Полный user flow: от главной до формы оплаты в браузерах firefox, webkit")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_user_flow_parametrized_firefox_webkit(page, get_film_url, device, throttling, geo, browser_type, request):
@@ -37,6 +38,13 @@ def test_user_flow_parametrized_firefox_webkit(page, get_film_url, device, throt
     allure.dynamic.tag(f"throttling:{throttling}")
     allure.dynamic.tag(f"geo:{geo}")
     allure.dynamic.tag(f"browser:{browser_type}")
+    
+    allure.dynamic.description(
+        f"**Устройство**: {device}\n"
+        f"**Сеть**: {throttling}\n"
+        f"**ГЕО**: {geo}\n"
+        f"**Браузер**: {browser_type}"
+    )
     
     with allure.step(f"Переходим на главную страницу {config.BASE_URL}"):
         try:

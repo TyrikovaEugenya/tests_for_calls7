@@ -11,7 +11,6 @@ import utils.metrics as metrics
 from utils.report_explainer import sanitize_filename
 from utils.lighthouse_runner import run_lighthouse_for_url, extract_metrics_from_lighthouse
 from utils.report_aggregator import log_issues_if_any
-from conftest import attach_report_to_test
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -20,6 +19,7 @@ logger = logging.getLogger(__name__)
 @pytest.mark.parametrize("throttling", config.THROTTLING_MODES)
 @pytest.mark.parametrize("geo", config.GEO_LOCATIONS)
 @pytest.mark.parametrize("browser_type", ["chromium"], scope="session")
+@allure.story("User Flow: Главная → Фильм → Плеер → Попап → Оплата")
 @allure.title("Полный user flow: от главной до формы оплаты  только в chromium")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_user_flow_parametrized_only_chromium(page, get_film_url, device, throttling, geo, browser_type, request):
@@ -37,6 +37,13 @@ def test_user_flow_parametrized_only_chromium(page, get_film_url, device, thrott
     allure.dynamic.tag(f"throttling:{throttling}")
     allure.dynamic.tag(f"geo:{geo}")
     allure.dynamic.tag(f"browser:{browser_type}")
+    
+    allure.dynamic.description(
+        f"**Устройство**: {device}\n"
+        f"**Сеть**: {throttling}\n"
+        f"**ГЕО**: {geo}\n"
+        f"**Браузер**: {browser_type}"
+    )
     
     with allure.step(f"Переходим на главную страницу {config.BASE_URL}"):
         try:
@@ -89,6 +96,7 @@ def test_user_flow_parametrized_only_chromium(page, get_film_url, device, thrott
             player_init_ms = round((time.time() - player_start) * 1000)
             
             page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(2000)
             metrics.inject_hls_buffering_listener(page)
             try:
                 lh_report = run_lighthouse_for_url(get_film_url)
@@ -277,7 +285,7 @@ def test_user_flow_parametrized_only_chromium(page, get_film_url, device, thrott
             json.dump(report, f, indent=2, ensure_ascii=False)
         allure.attach.file(report_path, name="JSON-отчёт по конкретному запуску", extension="json")
         
-        attach_report_to_test(request, report)
+        request.node._report_data = report
 
     
     assert report["is_problematic_flow"] == False, "Проблемный запуск"

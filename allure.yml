@@ -1,0 +1,10 @@
+custom_panels:
+  - name: Performance Dashboard
+    widgets:
+      - name: performance-metrics
+        type: custom
+        data:
+          - name: "Средний PPI"
+            value: "${aggregated.ppi.mean}"
+          - name: "Медленные видео (>15 сек)"
+            value: "${aggregated.video_slow.count}"

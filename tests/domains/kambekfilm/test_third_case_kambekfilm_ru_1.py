@@ -14,11 +14,13 @@ from utils.lighthouse_runner import run_lighthouse_for_url, extract_metrics_from
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-@allure.title("Второй сценарий: страница https://avgustk.ru/Dol")
+@pytest.mark.single_run
+@pytest.mark.domain_kambekfilm
+@allure.title("Третий сценарий: страница https://kambekfilm.ru/1")
 @allure.severity(allure.severity_level.CRITICAL)
-def test_second_case(page, get_film_url, device, throttling, geo, browser_type):
+def test_third_case(page, get_film_url, device, throttling, geo, browser_type):
     report = {
-        "test_name": "test_second_case",
+        "test_name": "test_third_case",
         "film_url": get_film_url,
         "device": device,
         "throttling": throttling,
@@ -30,7 +32,7 @@ def test_second_case(page, get_film_url, device, throttling, geo, browser_type):
     
     with allure.step(f"Переходим на страницу фильма и собираем метрики для {get_film_url}"):
         try:
-            dns_metrics = metrics.collect_network_metrics(page, target_domain="avgustk.ru")
+            dns_metrics = metrics.collect_network_metrics(page, target_domain="kambekfilm.ru")
             page.goto(get_film_url)
             player_start = time.time()
             page.wait_for_selector("video", timeout=15000)

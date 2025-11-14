@@ -1,0 +1,21 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = [
+    "-v",
+    "--tb=short",
+    "--color=yes",
+    "--strict-markers"
+]
+testpaths = ["tests"]
+markers = [
+    "performance: сбор метрик",
+    "user_flow: полный сценарий",
+    "parametrized",
+    "single_run",
+    "domain_calls7",
+    "domain_kambekfilm",
+    "domain_avgustk",
+    "browser_chromium",
+    "browser_firefox",
+    "browser_webkit"
+]
