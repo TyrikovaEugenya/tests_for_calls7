@@ -8,6 +8,7 @@ import statistics
 from typing import Dict, Any
 import json
 from pathlib import Path
+import requests
 
 CHROMIUM_PATH = "/opt/chromium/chrome"
 
@@ -26,12 +27,49 @@ geo_map = {
 }
 
 def pytest_addoption(parser):
-    parser.addoption('--film_url', action='store', default="https://calls7.com/movie/370",
-                     help="Choose url for film which page you want to test")
-    parser.addoption('--device', action='store', default="Desktop", choices=DEVICES)
-    parser.addoption("--throttling", action="store", default="No_throttling", choices=THROTTLING_MODES)
-    parser.addoption("--geo", action="store", default="Moscow", choices=GEO_LOCATIONS)
-    parser.addoption("--browser", action="store", default="chromium", choices=BROWSERS)
+    parser.addoption(
+        '--film_url',
+        action='store',
+        default="https://calls7.com/movie/370",
+        help="Choose url for film which page you want to test"
+    )
+    parser.addoption(
+        "--film_list",
+        action="store",
+        default=None,
+        help="Путь к films.json или films.txt со списком URL"
+    )
+    parser.addoption(
+        "--film_limit",
+        action="store",
+        type=int,
+        default=None,
+        help="Number of urls from list"
+    )
+    parser.addoption(
+        '--device',
+        action='store',
+        default="Desktop",
+        choices=DEVICES
+    )
+    parser.addoption(
+        "--throttling",
+        action="store",
+        default="No_throttling",
+        choices=THROTTLING_MODES
+    )
+    parser.addoption(
+        "--geo",
+        action="store",
+        default="Moscow",
+        choices=GEO_LOCATIONS
+    )
+    parser.addoption(
+        "--browser",
+        action="store",
+        default="chromium",
+        choices=BROWSERS
+    )
 
     
 @pytest.fixture()
@@ -54,6 +92,35 @@ def geo(request):
 def browser_type(request):
     return request.config.getoption("--browser")
 
+@pytest.fixture
+def film_list(request):
+    return request.config.getoption("--film_list")
+
+@pytest.fixture
+def film_limit(request):
+    return request.config.getoption("--film_limit")
+
+def load_film_urls(film_list_path: str, limit: int = None) -> list:
+    """Загружает список URL из JSON или TXT."""
+    path = Path(film_list_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Файл не найден: {film_list_path}")
+
+    if path.suffix == ".json":
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            urls = data.get("urls", data) if isinstance(data, dict) else data
+    elif path.suffix == ".txt":
+        with open(path, "r", encoding="utf-8") as f:
+            urls = [line.strip() for line in f if line.strip()]
+    else:
+        raise ValueError(f"Поддерживаются только .json и .txt, получено: {path.suffix}")
+    
+    if limit is not None:
+        urls = urls[:limit]
+
+    return urls
+
 def pytest_generate_tests(metafunc):
     """Автоматически параметризует тесты, если запрошены фикстуры."""
     device = metafunc.config.getoption("--device")
@@ -70,6 +137,25 @@ def pytest_generate_tests(metafunc):
             metafunc.parametrize("geo", GEO_LOCATIONS, scope="function")
         if "browser_type" in metafunc.fixturenames:
             metafunc.parametrize("browser_type", BROWSERS, scope="session")
+            
+    film_url = metafunc.config.getoption("--film_url")
+    film_list = metafunc.config.getoption("--film_list")
+    film_limit = metafunc.config.getoption("--film_limit")
+    
+    if "get_film_url" in metafunc.fixturenames:
+        if film_list:
+            urls = load_film_urls(film_list, limit=film_limit)
+            metafunc.parametrize(
+                "get_film_url",
+                urls,
+                scope="function",
+                ids=lambda x: x.split("/")[-2]  # человекочитаемые ID: kvest, chernyy-zamok
+            )
+        elif film_url:
+            metafunc.parametrize("get_film_url", [film_url], scope="function")
+        else:
+            # Нет входных данных — один пропущенный тест
+            metafunc.parametrize("get_film_url", [None], scope="function")
 
 
 @pytest.fixture(scope="session")
@@ -156,28 +242,35 @@ def page(browser_type, device, geo, throttling, browser_instance, playwright_ins
             time.sleep(0.5)
         except Exception as e:
             print(f"[WARN] Не удалось применить троттлинг: {e}")
-            
-    # rtt = page.evaluate("navigator.connection.rtt")
-    # downlink = page.evaluate("navigator.connection.downlink")
-    # etype = page.evaluate("navigator.connection.effectiveType")
-    # print(f"[DEBUG] connection: rtt={rtt}, downlink={downlink}, type={etype}")
+
                 
     yield page
     context.close()
+    
 
-        
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     outcome = yield
     rep = outcome.get_result()
+    
+    # 1. Скриншот при падении
     if rep.when == "call" and rep.failed:
         page = item.funcargs.get("page")
         if page:
-            allure.attach(
-                page.screenshot(),
-                name="screenshot",
-                attachment_type=allure.attachment_type.PNG
-            )
+            try:
+                allure.attach(
+                    page.screenshot(),
+                    name="screenshot",
+                    attachment_type=allure.attachment_type.PNG
+                )
+            except Exception as e:
+                print(f"[WARN] Скриншот не сохранён: {e}")
+    
+    # 2. Сохранение report — даже если тест упал
+    if rep.when == "call":
+        if hasattr(item, "_report_data") and isinstance(item._report_data, dict):
+            test_name = item.nodeid.split("::")[-1].split("[")[0]
+            _aggregator.add_report(test_name, item._report_data)
             
 
 class MultiTestRunAggregator:
@@ -196,6 +289,7 @@ class MultiTestRunAggregator:
             "test_name": test_name,
             "total_runs": len(reports),
             "problematic_runs": sum(1 for r in reports if r.get("is_problematic_flow", False)),
+            "failed_runs": sum(1 for r in reports if r.get("error")),
             "steps": defaultdict(lambda: {"ppi": [], "metrics": defaultdict(list)}),
             "distribution": {
                 "device": defaultdict(int),
@@ -204,6 +298,7 @@ class MultiTestRunAggregator:
                 "browser": defaultdict(int),
             },
             "film_urls": set(),
+            "errors": defaultdict(list),
         }
 
         # Сбор данных
@@ -214,6 +309,13 @@ class MultiTestRunAggregator:
             summary["distribution"]["geo"][r.get("geoposition", "N/A")] += 1
             summary["distribution"]["browser"][r.get("browser_type", "N/A")] += 1
             summary["film_urls"].add(r.get("film_url", "").strip())
+            
+            error_msg = r.get("error")
+            if error_msg:
+                # Упрощаем сообщение: берём только тип и первые 50 символов
+                simplified = re.sub(r"Call log:.*", "", error_msg).strip()
+                simplified = re.sub(r"\s+", " ", simplified)[:100]
+                summary["errors"][simplified].append(r)
 
             # Метрики по шагам
             for step_name, metrics in r.get("steps", {}).items():
@@ -284,14 +386,28 @@ class MultiTestRunAggregator:
 
     def _save_markdown(self, summary: dict, path: Path):
         md_lines = []
-        md_lines.append(f"# 📊 Итог по тесту: `{summary.get('test_name', 'unknown')}`\n")
+        test_name = summary.get("test_name", "unknown")
+        total = summary.get("total_runs", 0)
+        problematic = summary.get("problematic_runs", 0)
+        failed = summary["failed_runs"]
+        
+        md_lines.append(f"# 📊 Итог по тесту: `{test_name}`\n")
         md_lines.append(f"**Дата**: `{time.strftime('%Y-%m-%d %H:%M:%S')}`")
-        total_runs = summary.get("total_runs", 0)
-        problematic_runs = summary.get("problematic_runs", 0)
-        md_lines.append(f"**Всего тестов**: `{total_runs}`")
-        problematic_pct = problematic_runs / total_runs * 100
-        md_lines.append(f"**Проблемных сценариев**: `{problematic_runs}` (`{problematic_pct:.1f}%`)")
+        md_lines.append(f"**Всего запусков**: `{total}`")
+        md_lines.append(f"**Проблемных (по метрикам)**: `{problematic}` (`{problematic/total*100:.1f}%`)")
+        md_lines.append(f"**Упавших (по ошибкам)**: `{failed}` (`{failed/total*100:.1f}%`)")
         md_lines.append("")
+        
+        if summary["errors"]:
+            md_lines.append("## 🚨 Критические ошибки")
+            md_lines.append("| Ошибка | Частота | Пример URL |")
+            md_lines.append("|--------|---------|------------|")
+            for error_msg, reports in sorted(summary["errors"].items(), key=lambda x: len(x[1]), reverse=True):
+                count = len(reports)
+                pct = count / total * 100
+                example_url = reports[0].get("film_url", "N/A").split("?")[0]
+                md_lines.append(f"| `{error_msg}` | `{count}` (`{pct:.1f}%`) | `{example_url}` |")
+            md_lines.append("")
 
         # Фильмы
         films = summary["film_urls"]
@@ -368,36 +484,7 @@ _aggregator = MultiTestRunAggregator()
 def aggregate_run_summary():
     """Возвращает агрегированный отчёт после всех тестов."""
     yield _aggregator
-    # После всех тестов можно сохранить итог, но лучше — в pytest_sessionfinish
 
-
-# @pytest.fixture(autouse=True)
-# def register_report(request):
-#     """Автоматически регистрирует report, если тест его предоставляет."""
-#     yield
-#     # После завершения теста проверяем, есть ли report в funcargs
-#     test_name = request.node.originalname or request.node.name
-#     report = getattr(request.node, "_report_data", None)
-#     if report is not None:
-#         _aggregator.add_report(test_name, report)
-
-
-# Хелпер: тест может передать report через request.node
-# def attach_report_to_test(request, report: dict):
-#     """Вызывают в тесте: attach_report_to_test(request, report)"""
-#     print(f"[DEBUG] attaching report for {request.node.name}")
-#     test_name = request.node.originalname or request.node.name.split("[")[0]
-#     _aggregator.add_report(test_name, report)
-    
-
-@pytest.fixture(autouse=True)
-def auto_save_report(request):
-    yield
-    # После завершения теста проверяем, есть ли report
-    if hasattr(request.node, "_report_data") and isinstance(request.node._report_data, dict):
-        test_name = request.node.originalname or request.node.name.split("[")[0]
-        _aggregator.add_report(test_name, request.node._report_data)
-        
 
 _test_run_counts = defaultdict(int)
 _test_total_expected = {}
@@ -409,109 +496,40 @@ def pytest_collection_finish(session):
         test_name = item.originalname or item.name.split("[")[0]
         _test_total_expected[test_name] = _test_total_expected.get(test_name, 0) + 1
         
+_start_time = None
+
+def pytest_sessionstart(session):
+    global _start_time
+    _start_time = time.time()
+    
+def pytest_sessionfinish(session, exitstatus):
+    duration = time.time() - _start_time
+    start_iso = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(_start_time))
+    end_iso = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    
+    # Сохраняем в environment.properties для Allure
+    with open("allure-results/environment.properties", "a") as f:
+        f.write(f"Start {start_iso}\n")
+        f.write(f"End {end_iso}\n")
+        f.write(f"Duration={duration:.1f} sec\n")
+
 
 def pytest_runtest_logfinish(nodeid, location):
     """Вызывается после КАЖДОГО параметризованного запуска теста."""
     global _test_run_counts
 
-    test_name = location[2].split("[")[0]  # имя функции без параметров
+    test_name = nodeid.split("::")[-1].split("[")[0]
     _test_run_counts[test_name] += 1
 
     # Если все запуски теста завершены — сохраняем его агрегат
     if _test_run_counts[test_name] == _test_total_expected.get(test_name, 1):
         _aggregator.save_summary(test_name)
 
-# def pytest_sessionfinish(session, exitstatus):
-#     if _aggregator.reports:
-#         summary = _aggregator.get_summary()
-#         reports_dir = Path("reports")
-#         reports_dir.mkdir(exist_ok=True)
-
-#         # 1. Сохраняем JSON (как раньше)
-#         json_path = reports_dir / "RUN_SUMMARY.json"
-#         with open(json_path, "w", encoding="utf-8") as f:
-#             json.dump(summary, f, indent=2, ensure_ascii=False)
-
-#         # 2. Генерируем Markdown
-#         md_lines = []
-#         md_lines.append("# 📊 Итоговый отчёт по запуску автотестов\n")
-#         md_lines.append(f"**Дата**: `{time.strftime('%Y-%m-%d %H:%M:%S')}`")
-#         md_lines.append(f"**Всего тестов**: `{summary['total_runs']}`")
-#         problematic_pct = summary['problematic_runs'] / summary['total_runs'] * 100
-#         md_lines.append(f"**Проблемных сценариев**: `{summary['problematic_runs']}` (`{problematic_pct:.1f}%`)")
-#         md_lines.append("")
-
-#         # Фильмы
-#         films = summary["film_urls"]
-#         md_lines.append("### 🎬 Протестированные фильмы")
-#         for url in films[:5]:
-#             md_lines.append(f"- `{url}`")
-#         if len(films) > 5:
-#             md_lines.append(f"- ... и ещё {len(films) - 5}")
-#         md_lines.append("")
-
-#         # Сводка по шагам
-#         md_lines.append("### 📈 Производительность по шагам")
-#         md_lines.append("| Шаг | Средний PPI | Вариация (σ) | Время загрузки (среднее) |")
-#         md_lines.append("|-----|-------------|--------------|--------------------------|")
-
-#         for step_name, data in summary["steps"].items():
-#             ppi_stats = data.get("ppi_stats", {})
-#             ppi_mean = ppi_stats.get("mean", "—")
-#             ppi_stdev = ppi_stats.get("stdev", "—")
-            
-#             # Берём основную временную метрику для шага
-#             time_metric = ""
-#             if step_name == "main_page":
-#                 time_metric = f"LCP: {data['metrics'].get('lcp', {}).get('mean', '—')} мс"
-#             elif step_name == "film_page":
-#                 vs = data['metrics'].get('videoStartTime', {}).get('mean', '—')
-#                 time_metric = f"Video Start: {vs} мс"
-#             elif step_name == "pay_page":
-#                 iframe = data['metrics'].get('iframeCpLoadTime', {}).get('mean', '—')
-#                 time_metric = f"IFrame Load: {iframe} мс"
-            
-#             md_lines.append(f"| `{step_name}` | `{ppi_mean}` | `{ppi_stdev}` | `{time_metric}` |")
-#         md_lines.append("")
-
-#         # Распределение
-#         md_lines.append("### 🌍 Распределение по параметрам")
-#         for dim, counts in summary["distribution"].items():
-#             md_lines.append(f"#### `{dim}`")
-#             md_lines.append("| Значение | Количество |")
-#             md_lines.append("|----------|------------|")
-#             for val, cnt in sorted(counts.items()):
-#                 md_lines.append(f"| `{val}` | `{cnt}` |")
-#             md_lines.append("")
-
-#         # Проблемные показатели (если есть)
-#         problematic_metrics = []
-#         for step_name, data in summary["steps"].items():
-#             ppi_stats = data.get("ppi_stats", {})
-#             if ppi_stats.get("mean", 100) < 85:
-#                 problematic_metrics.append(f"- `{step_name}.pagePerformanceIndex`: {ppi_stats['mean']:.1f} < 85")
-#             for metric, stats in data.get("metrics", {}).items():
-#                 if isinstance(stats, dict):
-#                     mean = stats.get("mean", 0)
-#                     if metric == "videoStartTime" and mean > 15000:
-#                         problematic_metrics.append(f"- `{step_name}.{metric}`: {mean:.0f} мс > 15 сек")
-#                     if metric == "iframeCpLoadTime" and mean > 3000:
-#                         problematic_metrics.append(f"- `{step_name}.{metric}`: {mean:.0f} мс > 3 сек")
-
-#         if problematic_metrics:
-#             md_lines.append("### ⚠️ Выявленные проблемы")
-#             md_lines.extend(problematic_metrics)
-#             md_lines.append("")
-#         else:
-#             md_lines.append("### ✅ Проблем не выявлено\n")
-
-#         # Сохраняем MD
-#         md_path = reports_dir / "RUN_SUMMARY.md"
-#         with open(md_path, "w", encoding="utf-8") as f:
-#             f.write("\n".join(md_lines))
-
-#         # Вывод в консоль
-#         print(f"\n✅ Итоговые отчёты сохранены:")
-#         print(f"   📄 JSON: {json_path}")
-#         print(f"   📝 MD:   {md_path}")
-        
+def send_telegram_report(summary_text: str, chat_id: str, bot_token: str):
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    data = {
+        "chat_id": chat_id,
+        "text": f"🎬 Тесты завершены\n\n{summary_text}",
+        "parse_mode": "Markdown"
+    }
+    requests.post(url, data=data)

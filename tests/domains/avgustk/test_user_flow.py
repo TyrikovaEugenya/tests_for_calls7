@@ -24,7 +24,7 @@ class TestAvgustkUserFlow(BaseUserFlowTest):
         def main_page_step(page, report):
             dns_metrics = metrics.collect_network_metrics(page)
             self._goto_main_page(page)
-            lh_data = self._collect_lighthouse_metrics(report, self.BASE_URL)
+            lh_data = self._collect_lighthouse_metrics(self.BASE_URL)
             report["steps"]["main_page"] = {
                 **lh_data,
                 "dnsResolveTime": dns_metrics["dnsResolveTime"],
@@ -35,7 +35,7 @@ class TestAvgustkUserFlow(BaseUserFlowTest):
 
         def film_page_step(page, report):
             dns_metrics = metrics.collect_network_metrics(page)
-            lh_data = self._collect_lighthouse_metrics(report, get_film_url)
+            lh_data = self._collect_lighthouse_metrics(get_film_url)
             report["steps"]["film_page"].update({
                 **lh_data,
                 "dnsResolveTime": dns_metrics["dnsResolveTime"],

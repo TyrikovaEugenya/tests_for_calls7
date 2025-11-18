@@ -55,6 +55,9 @@ def log_issues_if_any(report: dict, log_path: str = "reports/issues.log"):
         if buttons_ok is False:
             issues.append(f"{test_display} | {film_url} | {step_name}.buttonsCpAvailable = False")
             
+    if report.get("error"):
+        issues.append(f"{test_display} | {film_url} | error = {report['error']}")
+            
     # 5. Запись в файл (дозапись)
     if issues:
         has_issues = True

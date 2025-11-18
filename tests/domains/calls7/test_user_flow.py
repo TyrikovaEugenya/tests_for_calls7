@@ -21,10 +21,10 @@ class TestCalls7UserFlow(BaseUserFlowTest):
     @allure.story("User Flow: Главная → Фильм → Плеер → Попап → Оплата")
     @allure.title("Полный user flow с Lighthouse (chromium)")
     def test_user_flow_chromium(self, page, get_film_url, device, throttling, geo, browser_type, request):
-        def main_page_step(page, report):
+        def main_page_step(page, request, report):
             dns_metrics = metrics.collect_network_metrics(page)
-            self._goto_main_page(page)
-            lh_data = self._collect_lighthouse_metrics(report, self.BASE_URL)
+            self._goto_main_page(page, request, report)
+            lh_data = self._collect_lighthouse_metrics(self.BASE_URL, request, report)
             report["steps"]["main_page"] = {
                 **lh_data,
                 "dnsResolveTime": dns_metrics["dnsResolveTime"],
@@ -33,9 +33,9 @@ class TestCalls7UserFlow(BaseUserFlowTest):
             if lh_data["is_problematic_page"]:
                 report["is_problematic_flow"] = True
 
-        def film_page_step(page, report):
+        def film_page_step(page, request, report):
             dns_metrics = metrics.collect_network_metrics(page)
-            lh_data = self._collect_lighthouse_metrics(report, get_film_url)
+            lh_data = self._collect_lighthouse_metrics(get_film_url, request, report)
             report["steps"]["film_page"].update({
                 **lh_data,
                 "dnsResolveTime": dns_metrics["dnsResolveTime"],
