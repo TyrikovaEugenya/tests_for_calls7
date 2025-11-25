@@ -88,7 +88,7 @@ def save_results(film_urls: list, output_dir: str = "data"):
     Path(output_dir).mkdir(exist_ok=True)
 
     # JSON — для программной обработки
-    json_path = Path(output_dir) / "films.json"
+    json_path = Path(output_dir) / "goodmovie_films.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump({
             "total": len(film_urls),
@@ -99,7 +99,7 @@ def save_results(film_urls: list, output_dir: str = "data"):
     print(f"📁 Сохранено: {json_path}")
 
     # TXT — для человека / grep / CI
-    txt_path = Path(output_dir) / "films.txt"
+    txt_path = Path(output_dir) / "goodmovie_films.txt"
     with open(txt_path, "w", encoding="utf-8") as f:
         for url in film_urls:
             f.write(url + "\n")
@@ -108,7 +108,7 @@ def save_results(film_urls: list, output_dir: str = "data"):
 
 if __name__ == "__main__":
     urls = collect_film_urls(
-        base_url="https://calls7.com",
+        base_url="https://tests.goodmovie.net",
         limit=100,          # максимум, который сайт принимает
         max_pages=200       # ~20 000 страниц
     )

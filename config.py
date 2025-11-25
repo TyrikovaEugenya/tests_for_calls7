@@ -12,7 +12,7 @@ SELECTORS = {
     "payment_iframe": "iframe[src*='cloudpayments']",
     "pay_button_in_iframe": "#cta-button",
     "pay_button_bank_card": "button[data-test='cardpay-page-button']",
-    "pay_form_bank_card": "input[automation-id='tui-input-card-group__card']",
+    "pay_form_bank_card": "tui-input-card-group[data-test='input-card-groupped']", # button[data-test=cardpay-button]
 }
 
 # === Метрики и пороги ===
@@ -36,6 +36,47 @@ METRIC_THRESHOLDS = {
     "videoStartTime": (3000, 10000),
     "iframeCpLoadTime": (2000, 4000),
 }
+
+def grade_metric(value_ms: float, metric_name: str) -> str:
+    thresholds = {
+        "videoStartTime": {"good": 3000, "ok": 6000, "poor": 15000},
+        "playerInitTime": {"good": 1000, "ok": 2000, "poor": 4000},
+        "popupAppearTime": {"good": 5000, "ok": 10000, "poor": 20000},
+        "iframeCpLoadTime": {"good": 2000, "ok": 4000, "poor": 8000},
+        
+        "main_page_load": {"good": 1500, "ok": 3000, "poor": 5000},
+        "film_cards_load": {"good": 2000, "ok": 4000, "poor": 8000},
+        
+        # Страница фильма
+        "film_page_load": {"good": 2000, "ok": 4000, "poor": 8000},
+        "player_init": {"good": 1000, "ok": 2000, "poor": 4000},
+        "player_ready": {"good": 2000, "ok": 4000, "poor": 8000},  # loadPlayer finished
+        "video_first_frame_A": {"good": 3000, "ok": 6000, "poor": 15000},  # заставка
+        "video_first_frame_B": {"good": 2000, "ok": 4000, "poor": 10000},  # без заставки
+        
+        # Попап блокировки
+        "lock_popup_appear": {"good": 3000, "ok": 6000, "poor": 12000},
+        
+        # Оплата
+        "payment_iframe_load": {"good": 2000, "ok": 4000, "poor": 8000},
+        "payment_form_card": {"good": 1500, "ok": 3000, "poor": 6000},
+        "payment_form_tpay": {"good": 1500, "ok": 3000, "poor": 6000},
+        "payment_form_sbp": {"good": 2000, "ok": 4000, "poor": 8000},
+        
+        # Повторные загрузки
+        "player_reload": {"good": 2000, "ok": 4000, "poor": 8000},
+        "video_reload_A": {"good": 4000, "ok": 8000, "poor": 20000},
+        "video_reload_B": {"good": 3000, "ok": 6000, "poor": 12000},
+    }.get(metric_name, {"good": 1000, "ok": 3000, "poor": 10000})
+    
+    if value_ms <= thresholds["good"]:
+        return "отлично"
+    elif value_ms <= thresholds["ok"]:
+        return "хорошо"
+    elif value_ms <= thresholds["poor"]:
+        return "удовлетворительно"
+    else:
+        return "плохо"
 
 DEVICES = ["Desktop", "Mobile"]
 THROTTLING_MODES = ["No_throttling", "Slow_4G"]

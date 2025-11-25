@@ -12,6 +12,7 @@ markers = [
     "user_flow: полный сценарий",
     "parametrized",
     "single_run",
+    "domain_goodmovie",
     "domain_calls7",
     "domain_kambekfilm",
     "domain_avgustk",

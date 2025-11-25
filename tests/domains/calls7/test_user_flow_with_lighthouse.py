@@ -246,7 +246,6 @@ def test_user_flow_with_metrics(page, get_film_url, device, throttling, geo, bro
             allure.attach(str(e), name="PaymentPage form visibility Error", attachment_type=allure.attachment_type.TEXT)
             
             
-            
 
     # === Сохранение финального отчёта ===
     with allure.step("Сохранить сводный отчёт"):

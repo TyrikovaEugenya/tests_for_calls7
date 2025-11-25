@@ -3,12 +3,13 @@ import re
 from playwright.sync_api import sync_playwright, Playwright
 import allure
 import time
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 import statistics
 from typing import Dict, Any
 import json
 from pathlib import Path
 import requests
+import config
 
 CHROMIUM_PATH = "/opt/chromium/chrome"
 
@@ -200,7 +201,6 @@ def page(browser_type, device, geo, throttling, browser_instance, playwright_ins
     else:
         context_args["viewport"] = {"width": 1920, "height": 1080}
             
-        # ГЕО: локаль и часовой пояс
     locale, timezone = geo_map.get(geo, ("ru-RU", "UTC"))
     context_args.update({
         "locale": locale,
@@ -222,26 +222,102 @@ def page(browser_type, device, geo, throttling, browser_instance, playwright_ins
             Object.defineProperty(navigator, 'webdriver', {
                 get: () => undefined
             });
+            // Мониторинг консоли
+            (function() {
+                const originalConsole = {
+                    log: console.log,
+                    info: console.info,
+                    debug: console.debug,
+                    warn: console.warn,
+                    error: console.error
+                };
+            
+                function interceptConsole(method, args) {
+                    try {
+                        const message = args.map(arg => {
+                            if (arg === null) return 'null';
+                            if (arg === undefined) return 'undefined';
+                            if (typeof arg === 'object') {
+                                try {
+                                    return JSON.stringify(arg);
+                                } catch(e) {
+                                    return String(arg);
+                                }
+                            }
+                            return String(arg);
+                        }).join(' ');
+                        
+                        // Сохраняем сообщения
+                        if (!window.__consoleMessages) {
+                            window.__consoleMessages = [];
+                        }
+                        window.__consoleMessages.push({
+                            type: method,
+                            message: message,
+                            timestamp: Date.now()
+                        });
+                        
+                        // Отмечаем готовность плеера
+                        if (message.includes('loadPlayer finished')) {
+                            window.__playerReadyDetected = true;
+                            window.__playerReadyTimestamp = Date.now();
+                            console.log('[MONITOR] 🎯 Player ready detected!');
+                        }
+                        
+                        // Вызываем оригинальный метод
+                        originalConsole[method].apply(console, args);
+                    } catch(e) {
+                        originalConsole[method].apply(console, args);
+                    }
+                }
+            
+                // Перехватываем все методы console
+                ['log', 'info', 'debug', 'warn', 'error'].forEach(method => {
+                    console[method] = function(...args) {
+                        interceptConsole(method, args);
+                    };
+                });
+            })();
         """)
     context.clear_cookies()
     page = context.new_page()
+    
+    if browser_type == "chromium":
+        client = context.new_cdp_session(page)
+        client.send("Runtime.enable")
+        client.send("Log.enable")
         
-    # троттлинг (только для Chromium) ===
-    if throttling == "Slow_4G" and browser_type == "chromium":
-        try:
-            client = context.new_cdp_session(page)
-            client.send("Network.enable")
-            client.send("Network.emulateNetworkConditions", {
-                "offline": False,
-                "latency": 400,
-                "downloadThroughput": 700 * 1024,
-                "uploadThroughput": 700 * 1024,
-                "connectionType": "cellular4g"
-            })
-            # Даём сети примениться
-            time.sleep(0.5)
-        except Exception as e:
-            print(f"[WARN] Не удалось применить троттлинг: {e}")
+        def on_log_entry(params):
+            text = params.get("entry", {}).get("text", "")
+                # Или из args, если text пустой:
+            args = params.get("entry", {}).get("args", [])
+            if not text and args:
+                text = " ".join(str(arg.get("value", "")) for arg in args)
+                
+            if "[Dc] loadPlayer finished" in text:
+                page.evaluate("""
+                    window.__playerReadyDetected = true;
+                    window.__playerReadyTimestamp = Date.now();
+                    window.__cdpDetected = true;
+                """)
+                print(f"[PLAYER] ✅ [Dc] loadPlayer finished: {text}")
+                
+        client.on("Log.entryAdded", on_log_entry)
+        time.sleep(0.1)
+        if throttling == "Slow_4G":
+            try:
+                client.send("Network.enable")
+                client.send("Network.emulateNetworkConditions", {
+                    "offline": False,
+                    "latency": 400,
+                    "downloadThroughput": 700 * 1024,
+                    "uploadThroughput": 700 * 1024,
+                    "connectionType": "cellular4g"
+                })
+                # Даём сети примениться
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"[WARN] Не удалось применить троттлинг: {e}")
 
                 
     yield page
@@ -287,6 +363,7 @@ class MultiTestRunAggregator:
         
         summary = {
             "test_name": test_name,
+            "domain": reports[0]["domain"],
             "total_runs": len(reports),
             "problematic_runs": sum(1 for r in reports if r.get("is_problematic_flow", False)),
             "failed_runs": sum(1 for r in reports if r.get("error")),
@@ -374,8 +451,8 @@ class MultiTestRunAggregator:
 
         # Уникальные имена файлов
         safe_name = re.sub(r'[<>:"/\\|?*\s]', '_', test_name)[:30]
-        json_path = reports_dir / f"RUN_SUMMARY_{safe_name}.json"
-        md_path = reports_dir / f"RUN_SUMMARY_{safe_name}.md"
+        json_path = reports_dir / f"RUN_SUMMARY_{safe_name}_{summary['domain']}.json"
+        md_path = reports_dir / f"RUN_SUMMARY_{safe_name}_{summary['domain']}.md"
         
         # Сохраняем JSON
         with open(json_path, "w", encoding="utf-8") as f:
@@ -470,11 +547,60 @@ class MultiTestRunAggregator:
             md_lines.append("### ⚠️ Выявленные проблемы")
             md_lines.extend(problematic_metrics)
             md_lines.append("")
-        else:
+        if failed > 0:
+            md_lines.append("### 🚨 Упавшие тесты (ошибки)")
+            md_lines.append(f"- Обнаружено `{failed}` падений (см. раздел «Критические ошибки» выше)")
+            md_lines.append("")
+        if not (problematic_metrics or failed):
             md_lines.append("### ✅ Проблем не выявлено\n")
+            
+        md_lines.append("## 📋 Детализация по шагам")
+        for step_name, step_data in summary["steps"].items():
+            if not step_data.get("metrics"):
+                continue
+
+            title_map = {
+                "main_page": "Главная страница",
+                "film_page": "Страница с конкретным фильмом",
+                "pay_page": "Оплата"
+            }
+            md_lines.append(f"\n### > {title_map.get(step_name, step_name)}:")
+
+            for metric_name, stats in step_data["metrics"].items():
+                if not isinstance(stats, dict) or "mean" not in stats:
+                    continue
+
+                # Берём ХУДШЕЕ значение (max) — заказчик обычно хочет видеть worst-case
+                value_ms = stats["max"]
+                grade = config.grade_metric(value_ms, metric_name)
+                icon = {"отлично": "✅", "хорошо": "🟢", "удовлетворительно": "🟡", "плохо": "🔴"}.get(grade, "❓")
+
+                # Человекочитаемое имя
+                nice_name = {
+                    "videoStartTime": "Загрузка первого кадра видео",
+                    "playerInitTime": "Загрузка плеера",
+                    "popupAppearTime": "Появление формы блокировки",
+                    "iframeCpLoadTime": "Загрузка формы оплаты на vidu.my",
+                    "lcp": "Largest Contentful Paint",
+                    "ttfb": "Time to First Byte"
+                }.get(metric_name, metric_name)
+
+                # Добавляем в отчёт
+                md_lines.append(
+                    f"{icon} **{nice_name}**: {int(value_ms)} мс "
+                    f"(ср. {int(stats['mean'])} мс) — **{grade}**"
+                )
+        md_lines.append("")
             
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(md_lines))
+            
+        allure.attach.file(
+            path,
+            name="Детализация по шагам",
+            extension="md"
+        )
+            
 
 # Глобальный агрегатор (на сессию)
 _aggregator = MultiTestRunAggregator()
@@ -502,16 +628,81 @@ def pytest_sessionstart(session):
     global _start_time
     _start_time = time.time()
     
+def aggregate_reports() -> dict:
+    """Собирает сводку и сохраняет в environment.properties для Allure."""
+    reports_dir = Path("reports")
+    if not reports_dir.exists():
+        return
+
+    # Собираем ВСЕ JSON-отчёты
+    reports = []
+    for report_file in reports_dir.glob("report_*.json"):
+        try:
+            with open(report_file, "r", encoding="utf-8") as f:
+                reports.append(json.load(f))
+        except Exception as e:
+            print(f"[WARN] Не удалось загрузить {report_file}: {e}")
+
+    if not reports:
+        return
+
+    total = len(reports)
+    problematic = sum(1 for r in reports if r.get("is_problematic_flow"))
+    failed = sum(1 for r in reports if r.get("error"))
+
+    # Оценка качества: чем меньше проблем — тем выше оценка
+    quality_score = max(0, int((1 - problematic / total) * 100))
+
+    # Счётчик ключевых проблем
+    video_slow = 0
+    lcp_bad = 0
+    iframe_slow = 0
+    for r in reports:
+        steps = r.get("steps", {})
+        # film_page.videoStartTime > 15 сек
+        vst = steps.get("film_page", {}).get("videoStartTime")
+        if vst and vst > 15000:
+            video_slow += 1
+        # main_page.LCP > 2500 мс
+        lcp = steps.get("main_page", {}).get("lcp")
+        if lcp and lcp > 2500:
+            lcp_bad += 1
+        # pay_page.iframeCpLoadTime > 3 сек
+        iframe = steps.get("pay_page", {}).get("iframeCpLoadTime")
+        if iframe and iframe > 3000:
+            iframe_slow += 1
+
+    # Формируем environment.properties
+    env = {
+        "Start time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(_start_time)),
+        "End time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "Duration": f"{(time.time() - _start_time):.1f} sec",
+        "Pages": f"{total} / 19975",
+        "Problematic pages": f"{problematic} ({problematic/total*100:.1f}%)",
+        "Failed by errors": f"{failed} ({failed/total*100:.1f}%)",
+        "Quality score": f"{quality_score}%",
+        # Ключевые проблемы — кратко, в одну строку
+        "film_page.videoStartTime > 15 sec": f"{video_slow} ({video_slow/total*100:.1f}%)",
+        "main_page.LCP > 2500 ms": f"{lcp_bad} ({lcp_bad/total*100:.1f}%)",
+        "pay_page.iframeCpLoadTime > 3 sec": f"{iframe_slow} ({iframe_slow/total*100:.1f}%)",
+    }
+    return env
+    
+
 def pytest_sessionfinish(session, exitstatus):
-    duration = time.time() - _start_time
-    start_iso = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(_start_time))
-    end_iso = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     
     # Сохраняем в environment.properties для Allure
-    with open("allure-results/environment.properties", "a") as f:
-        f.write(f"Start {start_iso}\n")
-        f.write(f"End {end_iso}\n")
-        f.write(f"Duration={duration:.1f} sec\n")
+    env_path = Path("allure-results")
+    env_path.mkdir(exist_ok=True)
+        
+    env = aggregate_reports()
+    with open(env_path / "environment.properties", "w", encoding="utf-8") as f:
+        for key, value in env.items():
+            # Экранируем знаки = и \ в значениях (Allure требует)
+            value = str(value).replace("\\", "\\\\").replace("=", "\\=")
+            f.write(f"{key} = {value}\n")
+            
+    print(f"\n✅ Environment для Allure обновлён: {env_path}")
 
 
 def pytest_runtest_logfinish(nodeid, location):

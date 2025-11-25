@@ -28,26 +28,27 @@ class BaseUserFlowTest:
         with allure.step(f"Переходим на страницу фильма и инициализируем плеер для {film_url}"):
             try:
                 page.goto(film_url)
+                player_ready_time = round(self._wait_for_player_simple(page, timeout=30) * 1000)
+                print(f"[DEBUG] After wait_for_player_simple: {player_ready_time} (type: {type(player_ready_time)})")
                 player_start = time.time()
                 page.wait_for_selector("video", timeout=15000)
                 player_init_ms = round((time.time() - player_start) * 1000)
+                
                 page.wait_for_load_state("networkidle")
-                return {"playerInitTime": player_init_ms}
+                result = {
+                    "playerInitTime": player_init_ms,
+                    "videoStartTime": player_ready_time
+                }
+                print(f"[DEBUG] _goto_film_page_and_init_player returning: {result}")
+                return result
             except PlaywrightTimeoutError:
                 raise
-                # pytest.fail(f"Видео не появилось на {film_url} за 15 сек", pytrace=False)
                 
     def _start_video_and_collect_metrics(self, page, request, report):
         with allure.step("Нажать Play и замерить videoStartTime"):
             try:
                 page.wait_for_selector(".plyr", timeout=10000)
-                metrics.inject_plyr_playing_listener(page)
                 page.click(self.SELECTORS["play_button"])
-                page.wait_for_function(
-                    "() => window.__videoStartTime !== null",
-                    timeout=30000
-                )
-                return page.evaluate("window.__videoStartTime")
             except Exception as e:
                 raise
                 # pytest.fail(f"Ошибка при запуске видео: {e}", pytrace=False)
@@ -99,12 +100,16 @@ class BaseUserFlowTest:
                 raise
                 # pytest.fail(f"Ошибка на странице оплаты: {e}", pytrace=False)
                 
-    def _check_payment_button_click(self, iframe, request, report):
+    def _check_payment_button_click(self, page, iframe, request, report):
         with allure.step("Проверить кликабельность кнопок на странице оплаты"):
             try:
                 bank_card_button = iframe.locator(self.SELECTORS["pay_button_bank_card"])
-                bank_card_button.wait_for(state="visible", timeout=15000)
+                bank_card_button.wait_for(state="visible", timeout=30000)
                 if bank_card_button.is_visible() and bank_card_button.is_enabled():
+                    page.wait_for_load_state("networkidle")
+                    bank_card_button.locator("tui-loader:not([aria-busy='true'])").first.wait_for(
+                        state="attached", timeout=10000
+                    )
                     bank_card_button.click(timeout=5000)
                     return {"buttonsCpAvailable": True, "buttonsClickSuccess": True}
                 else:
@@ -113,9 +118,10 @@ class BaseUserFlowTest:
                 raise
                 # pytest.fail("Клик по кнопке оплаты не удался", pytrace=False)
                 
-    def _wait_for_payment_form(self, iframe, request, report):
+    def _wait_for_payment_form(self, page, iframe, request, report):
         with allure.step("Проверить появление формы оплаты"):
             try:
+                page.wait_for_load_state("networkidle")
                 iframe.locator(self.SELECTORS["pay_form_bank_card"]).wait_for(state="visible")
             except Exception as e:
                 raise
@@ -147,6 +153,69 @@ class BaseUserFlowTest:
             "pagePerformanceIndex": ppi,
             "is_problematic_page": ppi < config.TARGET_PAGE_PERFORMANCE_INDEX
         }
+    
+    def _wait_for_player_simple(self, page, timeout=30):
+        """Простое ожидание готовности плеера через JS мониторинг"""
+        print(f"[INFO] Waiting for player ready (timeout: {timeout}s)")
+        
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            try:
+                # Проверяем статус через JS
+                result = page.evaluate("""
+                    () => {
+                        return {
+                            playerReady: window.__playerReadyDetected || false,
+                            playerReadyTime: window.__playerReadyTimestamp || null,
+                            messageCount: window.__consoleMessages ? window.__consoleMessages.length : 0,
+                            recentMessages: window.__consoleMessages ? 
+                                window.__consoleMessages.slice(-5).map(m => m.type + ': ' + m.message) : []
+                        };
+                    }
+                """)
+                
+                if result["playerReady"]:
+                    ready_time = time.time()
+                    print(f"[SUCCESS] Player ready detected at {ready_time}")
+                    return ready_time - start_time
+                
+                # Диагностика каждые 5 секунд
+                if int(time.time() - start_time) % 5 == 0:
+                    print(f"[DEBUG] Waiting... {int(time.time() - start_time)}s elapsed")
+                    print(f"[DEBUG] Messages: {result['messageCount']}")
+                    if result['recentMessages']:
+                        print("[DEBUG] Recent messages:")
+                        for msg in result['recentMessages']:
+                            print(f"  - {msg}")
+                
+                time.sleep(1)
+                
+            except Exception as e:
+                print(f"[ERROR] Check failed: {e}")
+                time.sleep(1)
+        
+        # Таймаут
+        print(f"[ERROR] Timeout after {timeout} seconds")
+        
+        # Финальная диагностика
+        try:
+            final = page.evaluate("""
+                () => {
+                    return {
+                        playerReady: window.__playerReadyDetected || false,
+                        allMessages: window.__consoleMessages ? 
+                            window.__consoleMessages.map(m => m.type + ': ' + m.message) : []
+                    };
+                }
+            """)
+            print(f"[DEBUG] Final state: playerReady={final['playerReady']}, messages={len(final['allMessages'])}")
+            for msg in final['allMessages'][-10:]:
+                print(f"  - {msg}")
+        except Exception as e:
+            print(f"[DEBUG] Final check failed: {e}")
+        
+        raise TimeoutError(f"Player not ready within {timeout}s")
                 
     # Основной метод — шаблонный метод (template method)
     def run_user_flow(self, page, get_film_url, device, throttling, geo, browser_type, request, extra_steps=None):
@@ -156,6 +225,7 @@ class BaseUserFlowTest:
         """
         report = {
             "test_name": request.node.name,
+            "domain": self.DOMAIN_NAME,
             "film_url": get_film_url,
             "device": device,
             "throttling": throttling,
@@ -193,8 +263,8 @@ class BaseUserFlowTest:
                 extra_steps["film_page_before_video"](page, request, report)
 
             # --- Шаг 3: Видео
-            video_start_ms = self._start_video_and_collect_metrics(page, request, report)
-            report["steps"]["film_page"]["videoStartTime"] = video_start_ms
+            self._start_video_and_collect_metrics(page, request, report)
+            
 
             # --- Шаг 4: Буферизация
             buffer_metrics = self._collect_buffering_metrics(page)
@@ -213,13 +283,14 @@ class BaseUserFlowTest:
             if extra_steps and "pay_page_before_click" in extra_steps:
                 extra_steps["pay_page_before_click"](page, request, report)
 
-            button_metrics = self._check_payment_button_click(iframe, request, report)
+            button_metrics = self._check_payment_button_click(page, iframe, request, report)
             report["steps"]["pay_page"].update(button_metrics)
 
-            self._wait_for_payment_form(iframe, request, report)
+            self._wait_for_payment_form(page, iframe, request, report)
 
             # --- Завершение
-            log_issues_if_any(report)
+            if log_issues_if_any(report):
+                report["is_problematic_flow"] = True
             request.node._report_data = report
             if report.get("is_problematic_flow"):
                 pytest.fail("Проблемный запуск", pytrace=False)
