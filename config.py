@@ -12,7 +12,11 @@ SELECTORS = {
     "payment_iframe": "iframe[src*='cloudpayments']",
     "pay_button_in_iframe": "#cta-button",
     "pay_button_bank_card": "button[data-test='cardpay-page-button']",
-    "pay_form_bank_card": "tui-input-card-group[data-test='input-card-groupped']", # button[data-test=cardpay-button]
+    "pay_button_sbp": "button[data-test='sbppay-button']",
+    "pay_button_tpay": "[data-testid='tpay-form'], .tpay-input",
+    "pay_form_bank_card": "tui-input-card-group[data-test='input-card-groupped']",
+    "pay_form_sbp": "img.qr-box",
+    "close_button": "img[data-test='close-button']"
 }
 
 # === Метрики и пороги ===
@@ -28,60 +32,50 @@ METRIC_WEIGHTS = {
 }
 
 METRIC_THRESHOLDS = {
+    "videoStartTime": (5000, 15000),
+    "popupAppearTime": (30000, 90000),     
+    "iframeCpLoadTime": (1000, 5000),     
+    "playerInitTime": (1000, 5000),      
     "lcp": (2500, 4000),
-    "fcp": (1800, 3000),
-    "tbt": (200, 600),
-    "ttfb": (600, 1000),
-    "inp": (200, 500),
-    "videoStartTime": (3000, 10000),
-    "iframeCpLoadTime": (2000, 4000),
+    "ttfb": (800, 1200),                 
+    "fcp": (1000, 3000),                  
+    "cls": (0.1, 0.25),  
+    "tbt": (200, 600),                    
+    "performance_score": (0.8, 0.6),      
+    "pagePerformanceIndex": (85, 70),     
+    "rebufferCount": (0, 3),              
+    "rebufferDuration": (0, 5000),
 }
 
-def grade_metric(value_ms: float, metric_name: str) -> str:
-    thresholds = {
-        "videoStartTime": {"good": 3000, "ok": 6000, "poor": 15000},
-        "playerInitTime": {"good": 1000, "ok": 2000, "poor": 4000},
-        "popupAppearTime": {"good": 5000, "ok": 10000, "poor": 20000},
-        "iframeCpLoadTime": {"good": 2000, "ok": 4000, "poor": 8000},
+def grade_metric(value: float, metric_name: str) -> str:
+    """Оценивает метрику по порогам"""
+    if metric_name not in METRIC_THRESHOLDS:
+        return "неизвестно"
         
-        "main_page_load": {"good": 1500, "ok": 3000, "poor": 5000},
-        "film_cards_load": {"good": 2000, "ok": 4000, "poor": 8000},
-        
-        # Страница фильма
-        "film_page_load": {"good": 2000, "ok": 4000, "poor": 8000},
-        "player_init": {"good": 1000, "ok": 2000, "poor": 4000},
-        "player_ready": {"good": 2000, "ok": 4000, "poor": 8000},  # loadPlayer finished
-        "video_first_frame_A": {"good": 3000, "ok": 6000, "poor": 15000},  # заставка
-        "video_first_frame_B": {"good": 2000, "ok": 4000, "poor": 10000},  # без заставки
-        
-        # Попап блокировки
-        "lock_popup_appear": {"good": 3000, "ok": 6000, "poor": 12000},
-        
-        # Оплата
-        "payment_iframe_load": {"good": 2000, "ok": 4000, "poor": 8000},
-        "payment_form_card": {"good": 1500, "ok": 3000, "poor": 6000},
-        "payment_form_tpay": {"good": 1500, "ok": 3000, "poor": 6000},
-        "payment_form_sbp": {"good": 2000, "ok": 4000, "poor": 8000},
-        
-        # Повторные загрузки
-        "player_reload": {"good": 2000, "ok": 4000, "poor": 8000},
-        "video_reload_A": {"good": 4000, "ok": 8000, "poor": 20000},
-        "video_reload_B": {"good": 3000, "ok": 6000, "poor": 12000},
-    }.get(metric_name, {"good": 1000, "ok": 3000, "poor": 10000})
+    good, poor = METRIC_THRESHOLDS[metric_name]
     
-    if value_ms <= thresholds["good"]:
-        return "отлично"
-    elif value_ms <= thresholds["ok"]:
-        return "хорошо"
-    elif value_ms <= thresholds["poor"]:
-        return "удовлетворительно"
+    # Для метрик, где больше = лучше (performance_score, pagePerformanceIndex)
+    if metric_name in ["performance_score", "pagePerformanceIndex"]:
+        if value >= good:
+            return "отлично"
+        elif value >= poor:
+            return "хорошо"
+        else:
+            return "плохо"
+    # Для метрик, где меньше = лучше (все остальные)
     else:
-        return "плохо"
+        if value <= good:
+            return "отлично"
+        elif value <= poor:
+            return "удовлетворительно"
+        else:
+            return "плохо"
 
 DEVICES = ["Desktop", "Mobile"]
 THROTTLING_MODES = ["No_throttling", "Slow_4G"]
 GEO_LOCATIONS = ["Moscow", "SPb", "Kazan", "Novosibirsk", "Yekaterinburg"]
 BROWSERS = ["chromium", "firefox", "webkit"]
+PAY_METHODS = ["card", 'sbp']
 
 # === Отчёт ===
 REPORT_OUTPUT = "report.json"

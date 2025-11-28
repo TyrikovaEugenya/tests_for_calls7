@@ -6,6 +6,7 @@ import allure
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 import config
 from utils import metrics
+from utils.scenario_detector import detect_video_scenario
 from utils.report_explainer import sanitize_filename
 from utils.report_aggregator import log_issues_if_any
 from utils.lighthouse_runner import run_lighthouse_for_url, extract_metrics_from_lighthouse
@@ -24,7 +25,7 @@ class BaseUserFlowTest:
                 raise
                 # pytest.fail(f"Не удалось загрузить {self.BASE_URL}", pytrace=False)
 
-    def _goto_film_page_and_init_player(self, page, film_url, request, report):
+    def _goto_film_page_and_init_player(self, page, film_url):
         with allure.step(f"Переходим на страницу фильма и инициализируем плеер для {film_url}"):
             try:
                 page.goto(film_url)
@@ -44,11 +45,12 @@ class BaseUserFlowTest:
             except PlaywrightTimeoutError:
                 raise
                 
-    def _start_video_and_collect_metrics(self, page, request, report):
-        with allure.step("Нажать Play и замерить videoStartTime"):
+    def _start_video_and_collect_metrics(self, page, scenario: str) -> int:
+        with allure.step("Нажать Play и замерить firstFrameTime"):
             try:
+                metrics.inject_plyr_playing_listener(page)
                 page.wait_for_selector(".plyr", timeout=10000)
-                page.click(self.SELECTORS["play_button"])
+                page.click(self.SELECTORS["video_element"])
             except Exception as e:
                 raise
                 # pytest.fail(f"Ошибка при запуске видео: {e}", pytrace=False)
@@ -66,18 +68,24 @@ class BaseUserFlowTest:
         with allure.step("Дождаться появления попапа оплаты и кликнуть"):
             try:
                 popup_start = time.time()
-                popup_locator = page.locator(self.SELECTORS["popup"])
+                popup_locator = page.locator(self.SELECTORS["popup_cta"])
                 popup_locator.wait_for(state="visible", timeout=90000)
                 popup_time_ms = round((time.time() - popup_start) * 1000)
 
                 if popup_locator.is_visible() and popup_locator.is_enabled():
-                    
-                    popup_locator.click(timeout=5000)
-                    return {
-                        "popupAppearTime": popup_time_ms,
-                        "popupAvailable": True,
-                        "popupClickSuccess": True
-                    }
+                    try:
+                        popup_locator.click(timeout=5000)
+                        return {
+                            "popupAppearTime": popup_time_ms,
+                            "popupAvailable": True,
+                            "popupClickSuccess": True
+                        }
+                    except:
+                        return {
+                            "popupAppearTime": popup_time_ms,
+                            "popupAvailable": True,
+                            "popupClickSuccess": False
+                        }
                 else:
                     return {
                         "popupAppearTime": popup_time_ms,
@@ -86,27 +94,32 @@ class BaseUserFlowTest:
                     }
             except PlaywrightTimeoutError:
                 raise
-                # pytest.fail("Попап оплаты не появился за 90 секунд", pytrace=False)
                 
     def _collect_payment_metrics(self, page, iframe_start_time, request, report):
         with allure.step("На странице оплаты собрать метрики"):
             try:
-                page.wait_for_selector(self.SELECTORS["payment_iframe"], timeout=15000)
+                page.wait_for_selector(self.SELECTORS["payment_iframe"], state="attached", timeout=15000)
                 iframe_load_time_ms = round((time.time() - iframe_start_time) * 1000)
                 return {
                     "iframeCpLoadTime": iframe_load_time_ms
                 }
             except Exception as e:
                 raise
-                # pytest.fail(f"Ошибка на странице оплаты: {e}", pytrace=False)
+
                 
-    def _check_payment_button_click(self, page, iframe, request, report):
+    def _check_payment_button_click(self, page, iframe, pay_method):
         with allure.step("Проверить кликабельность кнопок на странице оплаты"):
             try:
-                bank_card_button = iframe.locator(self.SELECTORS["pay_button_bank_card"])
+                page.wait_for_load_state("networkidle")
+                match pay_method:
+                    case "card":
+                        bank_card_button = iframe.locator(self.SELECTORS["pay_button_bank_card"])
+                    case "sbp":
+                        bank_card_button = iframe.locator(self.SELECTORS["pay_button_sbp"])
+                    case "tpay":
+                        bank_card_button = iframe.locator(self.SELECTORS["pay_button_tpay"])
                 bank_card_button.wait_for(state="visible", timeout=30000)
                 if bank_card_button.is_visible() and bank_card_button.is_enabled():
-                    page.wait_for_load_state("networkidle")
                     bank_card_button.locator("tui-loader:not([aria-busy='true'])").first.wait_for(
                         state="attached", timeout=10000
                     )
@@ -118,16 +131,64 @@ class BaseUserFlowTest:
                 raise
                 # pytest.fail("Клик по кнопке оплаты не удался", pytrace=False)
                 
-    def _wait_for_payment_form(self, page, iframe, request, report):
+    def _wait_for_payment_form(self, page, iframe, pay_method):
         with allure.step("Проверить появление формы оплаты"):
             try:
                 page.wait_for_load_state("networkidle")
-                iframe.locator(self.SELECTORS["pay_form_bank_card"]).wait_for(state="visible")
+                match pay_method:
+                    case "card":
+                        iframe.locator(self.SELECTORS["pay_form_bank_card"]).wait_for(state="visible")
+                        return {"payFormAppear": True}
+                    case "sbp":
+                        iframe.locator(self.SELECTORS["pay_form_sbp"]).wait_for(state="visible")
+                        return {"payFormAppear": True}
             except Exception as e:
-                raise
-                # pytest.fail(f"Форма оплаты не появилась: {e}", pytrace=False)
+                return {"payFormAppear": False}
 
-                
+    def _load_popup_after_closing_pay_form(self, page, iframe):
+        with allure.step("Закрыть форму оплаты и замерить время появления формы vidu"):
+            try:
+                start_time = time.time()
+                iframe.locator(self.SELECTORS["close_button"]).click(timeout=10000)
+                page.locator(self.SELECTORS["pay_button_in_iframe"]).wait_for(state="visible", timeout=30000)
+                popup_load_time_ms = round((time.time() - start_time) * 1000)
+                return {
+                    "popupReloadTime": popup_load_time_ms,
+                    "popupIsVisibleAfterReload": True
+                }
+            except Exception as e:
+                return {
+                    "popupReloadTime": None,
+                    "popupIsVisibleAfterReload": False,
+                    "error": str(e)
+                }
+            
+    def _retry_payment_from_vidu_popup(self, page) -> dict:
+        """
+        Нажимает «Оплатить доступ сейчас» и ждёт новую форму оплаты.
+        Возвращает: {"loadTime": int, "success": bool}
+        """
+        with allure.step("Повторная загрузка формы оплаты из попапа Vidu"):
+            try:
+                # Кликаем по кнопке в попапе
+                retry_btn = page.locator(self.SELECTORS["pay_button_in_iframe"])
+                retry_btn.wait_for(state="visible", timeout=5000)
+                iframe_start = time.time()
+                retry_btn.click(timeout=5000)
+
+                # Ждём iframe
+                page.wait_for_selector(self.SELECTORS["payment_iframe"], timeout=15000)
+
+                return {
+                    "loadTime": round((time.time() - iframe_start) * 1000),
+                    "success": True
+                }
+            except Exception as e:
+                return {
+                    "loadTime": None,
+                    "success": False,
+                    "error": str(e)
+                }
                 
     def _collect_lighthouse_metrics(self, url, request, report):
         try:
@@ -218,7 +279,7 @@ class BaseUserFlowTest:
         raise TimeoutError(f"Player not ready within {timeout}s")
                 
     # Основной метод — шаблонный метод (template method)
-    def run_user_flow(self, page, get_film_url, device, throttling, geo, browser_type, request, extra_steps=None):
+    def run_user_flow(self, page, get_film_url, device, throttling, geo, browser_type, pay_method, request, extra_steps=None):
         """
         Общий сценарий. extra_steps — словарь с кастомными шагами: 
         {"main_page": func, "film_page_before_video": func}
@@ -241,7 +302,8 @@ class BaseUserFlowTest:
             f"**Устройство**: {device}\n"
             f"**Сеть**: {throttling}\n"
             f"**ГЕО**: {geo}\n"
-            f"**Браузер**: {browser_type}"
+            f"**Браузер**: {browser_type}\n"
+            f"**Способ оплаты**: {pay_method}"
         )
         
         request.node._report_data = report
@@ -256,19 +318,21 @@ class BaseUserFlowTest:
                     self._goto_main_page(page, request, report)
 
             # --- Шаг 2: Страница фильма
-            film_metrics = self._goto_film_page_and_init_player(page, get_film_url, request, report)
+            film_metrics = self._goto_film_page_and_init_player(page, get_film_url)
             report["steps"]["film_page"] = film_metrics
 
             if extra_steps and "film_page_before_video" in extra_steps:
                 extra_steps["film_page_before_video"](page, request, report)
-
-            # --- Шаг 3: Видео
-            self._start_video_and_collect_metrics(page, request, report)
-            
+                
+            # 3. Определяем сценарий
+            scenario = detect_video_scenario(page)
+            report["video_scenario"] = scenario
 
             # --- Шаг 4: Буферизация
             buffer_metrics = self._collect_buffering_metrics(page)
             report["steps"]["film_page"].update(buffer_metrics)
+            
+            self._start_video_and_collect_metrics(page, scenario)
 
             # --- Шаг 5: Попап
             popup_metrics = self._wait_for_popup_and_click(page, request, report)
@@ -283,11 +347,27 @@ class BaseUserFlowTest:
             if extra_steps and "pay_page_before_click" in extra_steps:
                 extra_steps["pay_page_before_click"](page, request, report)
 
-            button_metrics = self._check_payment_button_click(page, iframe, request, report)
+            button_metrics = self._check_payment_button_click(page, iframe, pay_method)
             report["steps"]["pay_page"].update(button_metrics)
 
-            self._wait_for_payment_form(page, iframe, request, report)
-
+            payment_form_appear = self._wait_for_payment_form(page, iframe, pay_method)
+            report["steps"]["pay_page"].update(payment_form_appear)
+            
+            vidu_popup = self._load_popup_after_closing_pay_form(page, iframe)
+            retry_payment = self._retry_payment_from_vidu_popup(page)
+            report["steps"]["after_payment_popup"] = {
+                "viduPopupAppearTime": vidu_popup.get("popupReloadTime"),
+                "viduPopupSuccess": vidu_popup.get("popupIsVisibleAfterReload"),
+                "retryPaymentLoadTime": retry_payment.get("loadTime"),
+                "retryPaymentSuccess": retry_payment.get("success"),
+            }
+            report["error"] = retry_payment.get("error")
+            
+            film_metrics_after_return = self._goto_film_page_and_init_player(page, get_film_url)
+            report["steps"]["after_return_without_payment"] = {
+                "playerInitTime": film_metrics_after_return.get("playerInitTime"),
+                "videoStartTime": film_metrics_after_return.get("videoStartTime"),
+            }
             # --- Завершение
             if log_issues_if_any(report):
                 report["is_problematic_flow"] = True
@@ -300,14 +380,14 @@ class BaseUserFlowTest:
             raise
         finally:
             # Сохранение отчёта
-            self._save_report(report, get_film_url, device, throttling, geo, browser_type, request)
+            self._save_report(report, get_film_url, device, throttling, geo, browser_type, pay_method)
         return report
     
-    def _save_report(self, report, film_url, device, throttling, geo, browser_type, request):
+    def _save_report(self, report, film_url, device, throttling, geo, browser_type, pay_method):
         Path("reports").mkdir(exist_ok=True)
         safe_url = sanitize_filename(film_url)
         test_name = report["test_name"].split("[")[0]
-        report_path = f"reports/report_{self.DOMAIN_NAME}_{test_name}_{safe_url}_{device}_{throttling}_{geo}_{browser_type}.json"
+        report_path = f"reports/report_{self.DOMAIN_NAME}_{test_name}_{safe_url}_{device}_{throttling}_{geo}_{browser_type}_{pay_method}.json"
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, ensure_ascii=False)
         allure.attach.file(report_path, name="JSON-отчёт", extension="json")
