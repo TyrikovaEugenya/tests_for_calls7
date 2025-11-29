@@ -9,7 +9,7 @@ import config
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 import utils.metrics as metrics
 from utils.report_explainer import sanitize_filename
-from utils.report_aggregator import log_issues_if_any
+from utils.log_issues import log_issues_if_any
 # from conftest import attach_report_to_test
 
 

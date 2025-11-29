@@ -10,7 +10,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 import utils.metrics as metrics
 from utils.report_explainer import sanitize_filename
 from utils.lighthouse_runner import run_lighthouse_for_url, extract_metrics_from_lighthouse
-from utils.report_aggregator import log_issues_if_any
+from utils.log_issues import log_issues_if_any
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)

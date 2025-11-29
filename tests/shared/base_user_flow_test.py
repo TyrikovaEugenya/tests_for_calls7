@@ -8,7 +8,7 @@ import config
 from utils import metrics
 from utils.scenario_detector import detect_video_scenario
 from utils.report_explainer import sanitize_filename
-from utils.report_aggregator import log_issues_if_any
+from utils.log_issues import log_issues_if_any
 from utils.lighthouse_runner import run_lighthouse_for_url, extract_metrics_from_lighthouse
 
 class BaseUserFlowTest:

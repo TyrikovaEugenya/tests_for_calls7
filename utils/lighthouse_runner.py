@@ -6,8 +6,9 @@ from pathlib import Path
 import config
 
 def run_lighthouse_for_url(url: str, timeout_sec: int = 60) -> dict:
-    chromium_path = config.CHROMIUM_PATH
     """Запускает Lighthouse CLI и возвращает JSON-отчёт."""
+    chromium_path = config.CHROMIUM_PATH
+    
     with tempfile.TemporaryDirectory() as tmp:
         output = Path(tmp) / "lh_report.json"
         
@@ -34,9 +35,7 @@ def run_lighthouse_for_url(url: str, timeout_sec: int = 60) -> dict:
             f"--output-path={output}",
             "--quiet",
             f"--chrome-path={chromium_path}",
-            #"--chrome-flags=--headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage",
             "--only-categories=performance",
-            #"--disable-storage-reset",
             "--throttling-method=provided"  # используем сеть из Playwright (если настроена)
         ]
 

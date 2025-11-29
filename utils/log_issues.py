@@ -18,7 +18,7 @@ def log_issues_if_any(report: dict, log_path: str = "reports/issues.log"):
     film_url = report.get("film_url", "").strip()
     test_display = f"{test_name}[{device}, {throttling}, {geo}, {browser}]"
     
-    # 1. Проверяем Page Performance Index по шагам
+    # Проверяем Page Performance Index по шагам
     for step_name, metrics in report.get("steps", {}).items():
         if not isinstance(metrics, dict):
             continue
@@ -27,7 +27,7 @@ def log_issues_if_any(report: dict, log_path: str = "reports/issues.log"):
         if ppi is not None and ppi < config.TARGET_PAGE_PERFORMANCE_INDEX:
             issues.append(f"{test_display} | {film_url} | {step_name}.pagePerformanceIndex = {ppi}")
             
-    # 2. Проверяем ВСЕ индивидуальные метрики из METRIC_THRESHOLDS
+    # Проверяем ВСЕ индивидуальные метрики из METRIC_THRESHOLDS
     for step_name, metrics in report.get("steps", {}).items():
         if not isinstance(metrics, dict):
             continue
@@ -45,7 +45,7 @@ def log_issues_if_any(report: dict, log_path: str = "reports/issues.log"):
             if value > poor:
                 issues.append(f"{test_display} | {film_url} | {step_name}.{metric_name} = {value}")
                 
-    # 3. Проверяем ВСЕ бинарные метрики
+    # Проверяем ВСЕ бинарные метрики
     binary_metrics = [
         "popupAvailable", "buttonsCpAvailable", "popupClickSuccess", 
         "buttonsClickSuccess", "payFormAppear", "viduPopupSuccess", "retryPaymentSuccess"
@@ -60,7 +60,7 @@ def log_issues_if_any(report: dict, log_path: str = "reports/issues.log"):
             if value is False:
                 issues.append(f"{test_display} | {film_url} | {step_name}.{metric_name} = False")
 
-    # 4. Дополнительные проверки для специфичных метрик
+    # Дополнительные проверки для специфичных метрик
     for step_name, metrics in report.get("steps", {}).items():
         if not isinstance(metrics, dict):
             continue
@@ -83,7 +83,7 @@ def log_issues_if_any(report: dict, log_path: str = "reports/issues.log"):
     if report.get("error"):
         issues.append(f"{test_display} | {film_url} | error = {report['error']}")
             
-    # 5. Запись в файл (дозапись)
+    # Запись в файл (дозапись)
     if issues:
         has_issues = True
         Path("reports").mkdir(exist_ok=True)
