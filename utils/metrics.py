@@ -1,122 +1,221 @@
 from playwright.sync_api import sync_playwright
 import time
 
+# def inject_console_monitor(page):
+#     """
+#     Инжектирует мониторинг console.log/console.info в страницу.
+#     Сохраняет все сообщения в window.__consoleMessages и устанавливает флаг
+#     window.__playerReady при обнаружении 'loadPlayer finished'.
+#     """
+#     page.evaluate("""
+#         // Сохраняем оригинальные методы консоли
+#         const originalLog = console.log;
+#         const originalInfo = console.info;
+#         const originalWarn = console.warn;
+#         const originalError = console.error;
 
+#         // Инициализируем хранилище сообщений
+#         if (!window.__consoleMessages) {
+#             window.__consoleMessages = [];
+#         }
+#         if (!window.__playerReady) {
+#             window.__playerReady = false;
+#             window.__playerReadyTime = null;
+#             window.__playerReadyMessage = null;
+#         }
 
-def wait_for_player_ready(page, timeout=30):
-    """Ожидает готовность плеера с улучшенной диагностикой"""
-    start_time = time.time()
-    last_check_time = start_time
-    checked_messages = 0
-    
-    print(f"[INFO] Starting to wait for player ready (timeout: {timeout}s)")
-    
-    while time.time() - start_time < timeout:
-        try:
-            result = page.evaluate("""
-                () => {
-                    if (!window.__consoleMessages) {
-                        return { error: "Monitor not initialized" };
-                    }
-                    return {
-                        playerReady: window.__playerReady || false,
-                        playerReadyTime: window.__playerReadyTime || null,
-                        playerReadyMessage: window.__playerReadyMessage || null,
-                        messageCount: window.__consoleMessages.length,
-                        recentMessages: window.__consoleMessages.slice(-20).map(m => ({
-                            type: m.type,
-                            message: m.message,
-                            timestamp: m.timestamp
-                        })),
-                        allDcMessages: window.__consoleMessages
-                            .filter(m => m.message.includes('[Dc]'))
-                            .map(m => m.type + ': ' + m.message)
-                    };
-                }
-            """)
-            
-            if "error" in result:
-                print(f"[ERROR] Monitor error: {result['error']}")
-                # Попробуем перезапустить мониторинг
-                inject_console_monitor(page)
-                time.sleep(1)
-                continue
-            
-            if result["playerReady"]:
-                ready_time = result["playerReadyTime"] / 1000  # Convert from JS timestamp
-                print(f"[SUCCESS] Player ready detected!")
-                print(f"[SUCCESS] Message: {result['playerReadyMessage']}")
-                print(f"[SUCCESS] JS Timestamp: {result['playerReadyTime']}")
-                print(f"[SUCCESS] Python Timestamp: {time.time()}")
-                return ready_time
-            
-            # Логируем прогресс каждые 3 секунды
-            current_time = time.time()
-            if current_time - last_check_time >= 3:
-                print(f"[DEBUG] Still waiting... {int(current_time - start_time)}s elapsed")
-                print(f"[DEBUG] Total messages: {result['messageCount']}")
-                print(f"[DEBUG] [Dc] messages: {len(result['allDcMessages'])}")
+#         // Универсальный обработчик сообщений
+#         function handleConsoleMessage(type, args) {
+#             try {
+#                 // Преобразуем аргументы в строку
+#                 const msg = args.map(arg => {
+#                     try {
+#                         return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+#                     } catch (e) {
+#                         return String(arg);
+#                     }
+#                 }).join(' ');
                 
-                if result["allDcMessages"]:
-                    print(f"[DEBUG] Recent [Dc] messages:")
-                    for msg in result["allDcMessages"][-5:]:
-                        print(f"  - {msg}")
-                
-                last_check_time = current_time
-            
-            # Проверяем новые сообщения
-            if result["messageCount"] > checked_messages:
-                new_messages = result["messageCount"] - checked_messages
-                if new_messages > 0:
-                    recent = result["recentMessages"][-new_messages:]
-                    for msg in recent:
-                        if 'loadPlayer' in msg['message'] or 'player' in msg['message'].lower():
-                            print(f"[MONITOR] Player-related: {msg['type']}: {msg['message']}")
-                    checked_messages = result["messageCount"]
-            
-            time.sleep(0.5)
-            
-        except Exception as e:
-            print(f"[ERROR] JS evaluation failed: {e}")
-            time.sleep(1)
-    
-    # Таймаут - детальная диагностика
-    print(f"[ERROR] TIMEOUT after {timeout} seconds")
-    try:
-        final_result = page.evaluate("""
-            () => {
-                if (!window.__consoleMessages) {
-                    return { error: "No monitor data" };
-                }
-                return {
-                    playerReady: window.__playerReady || false,
-                    allMessages: window.__consoleMessages.map(m => m.type + ': ' + m.message),
-                    dcMessages: window.__consoleMessages
-                        .filter(m => m.message.includes('[Dc]'))
-                        .map(m => m.type + ': ' + m.message),
-                    playerMessages: window.__consoleMessages
-                        .filter(m => m.message.toLowerCase().includes('player'))
-                        .map(m => m.type + ': ' + m.message)
-                };
-            }
-        """)
+#                 // Сохраняем сообщение
+#                 const timestamp = performance.now();
+#                 window.__consoleMessages.push({
+#                     type: type,
+#                     message: msg,
+#                     timestamp: timestamp
+#                 });
+
+#                 // Проверяем ключевые фразы для определения готовности плеера
+#                 if (msg.includes('loadPlayer finished') || 
+#                     msg.includes('playerReady') ||
+#                     (msg.includes('[Db]') && msg.includes('finished') && msg.includes('player'))) {
+                    
+#                     window.__playerReady = true;
+#                     window.__playerReadyTime = timestamp;
+#                     window.__playerReadyMessage = msg;
+                    
+#                     // Отладочное сообщение в реальную консоль
+#                     originalInfo('[TEST] Player ready detected:', msg);
+#                 }
+#             } catch (e) {
+#                 // Молча игнорируем ошибки в обработчике
+#                 originalWarn('[TEST] Console monitor error:', e);
+#             }
+#         }
+
+#         // Переопределяем методы консоли
+#         console.log = function(...args) {
+#             handleConsoleMessage('log', args);
+#             originalLog.apply(console, args);
+#         };
         
-        if "error" in final_result:
-            print(f"[DEBUG] {final_result['error']}")
-        else:
-            print(f"[DEBUG] Final status - Player ready: {final_result['playerReady']}")
-            print(f"[DEBUG] Total messages: {len(final_result['allMessages'])}")
-            print(f"[DEBUG] [Dc] messages ({len(final_result['dcMessages'])}")
-            for msg in final_result['dcMessages']:
-                print(f"  - {msg}")
-            print(f"[DEBUG] Player-related messages ({len(final_result['playerMessages'])}):")
-            for msg in final_result['playerMessages']:
-                print(f"  - {msg}")
-                
-    except Exception as e:
-        print(f"[ERROR] Final diagnosis failed: {e}")
+#         console.info = function(...args) {
+#             handleConsoleMessage('info', args);
+#             originalInfo.apply(console, args);
+#         };
+        
+#         console.warn = function(...args) {
+#             handleConsoleMessage('warn', args);
+#             originalWarn.apply(console, args);
+#         };
+        
+#         console.error = function(...args) {
+#             handleConsoleMessage('error', args);
+#             originalError.apply(console, args);
+#         };
+
+#         // Дополнительно: слушаем сообщения из iframe через postMessage
+#         // (на случай, если логи идут изнутри iframe)
+#         if (!window.__testPostMessageListener) {
+#             window.addEventListener('message', function(event) {
+#                 try {
+#                     if (typeof event.data === 'string' && event.data.includes('loadPlayer')) {
+#                         handleConsoleMessage('postMessage', [event.data]);
+#                     }
+#                 } catch (e) {
+#                     // Игнорируем
+#                 }
+#             });
+#             window.__testPostMessageListener = true;
+#         }
+
+#         // Отладочное сообщение
+#         console.info('[TEST] Console monitor initialized');
+#     """)
+
+# def wait_for_player_ready(page, timeout=30):
+#     """Ожидает готовность плеера с улучшенной диагностикой"""
+#     start_time = time.time()
+#     last_check_time = start_time
+#     checked_messages = 0
     
-    raise TimeoutError(f"Player ready not detected within {timeout} seconds")
+#     print(f"[INFO] Starting to wait for player ready (timeout: {timeout}s)")
+    
+#     while time.time() - start_time < timeout:
+#         try:
+#             result = page.evaluate("""
+#                 () => {
+#                     if (!window.__consoleMessages) {
+#                         return { error: "Monitor not initialized" };
+#                     }
+#                     return {
+#                         playerReady: window.__playerReady || false,
+#                         playerReadyTime: window.__playerReadyTime || null,
+#                         playerReadyMessage: window.__playerReadyMessage || null,
+#                         messageCount: window.__consoleMessages.length,
+#                         recentMessages: window.__consoleMessages.slice(-20).map(m => ({
+#                             type: m.type,
+#                             message: m.message,
+#                             timestamp: m.timestamp
+#                         })),
+#                         allDcMessages: window.__consoleMessages
+#                             .filter(m => m.message.includes('[Dc]'))
+#                             .map(m => m.type + ': ' + m.message)
+#                     };
+#                 }
+#             """)
+            
+#             if "error" in result:
+#                 print(f"[ERROR] Monitor error: {result['error']}")
+#                 # Попробуем перезапустить мониторинг
+#                 inject_console_monitor(page)
+#                 time.sleep(1)
+#                 continue
+            
+#             if result["playerReady"]:
+#                 ready_time = result["playerReadyTime"] / 1000  # Convert from JS timestamp
+#                 print(f"[SUCCESS] Player ready detected!")
+#                 print(f"[SUCCESS] Message: {result['playerReadyMessage']}")
+#                 print(f"[SUCCESS] JS Timestamp: {result['playerReadyTime']}")
+#                 print(f"[SUCCESS] Python Timestamp: {time.time()}")
+#                 return ready_time
+            
+#             # Логируем прогресс каждые 3 секунды
+#             current_time = time.time()
+#             if current_time - last_check_time >= 3:
+#                 print(f"[DEBUG] Still waiting... {int(current_time - start_time)}s elapsed")
+#                 print(f"[DEBUG] Total messages: {result['messageCount']}")
+#                 print(f"[DEBUG] [Dc] messages: {len(result['allDcMessages'])}")
+                
+#                 if result["allDcMessages"]:
+#                     print(f"[DEBUG] Recent [Dc] messages:")
+#                     for msg in result["allDcMessages"][-5:]:
+#                         print(f"  - {msg}")
+                
+#                 last_check_time = current_time
+            
+#             # Проверяем новые сообщения
+#             if result["messageCount"] > checked_messages:
+#                 new_messages = result["messageCount"] - checked_messages
+#                 if new_messages > 0:
+#                     recent = result["recentMessages"][-new_messages:]
+#                     for msg in recent:
+#                         if 'loadPlayer' in msg['message'] or 'player' in msg['message'].lower():
+#                             print(f"[MONITOR] Player-related: {msg['type']}: {msg['message']}")
+#                     checked_messages = result["messageCount"]
+            
+#             time.sleep(0.5)
+            
+#         except Exception as e:
+#             print(f"[ERROR] JS evaluation failed: {e}")
+#             time.sleep(1)
+    
+#     # Таймаут - детальная диагностика
+#     print(f"[ERROR] TIMEOUT after {timeout} seconds")
+#     try:
+#         final_result = page.evaluate("""
+#             () => {
+#                 if (!window.__consoleMessages) {
+#                     return { error: "No monitor data" };
+#                 }
+#                 return {
+#                     playerReady: window.__playerReady || false,
+#                     allMessages: window.__consoleMessages.map(m => m.type + ': ' + m.message),
+#                     dcMessages: window.__consoleMessages
+#                         .filter(m => m.message.includes('[Dc]'))
+#                         .map(m => m.type + ': ' + m.message),
+#                     playerMessages: window.__consoleMessages
+#                         .filter(m => m.message.toLowerCase().includes('player'))
+#                         .map(m => m.type + ': ' + m.message)
+#                 };
+#             }
+#         """)
+        
+#         if "error" in final_result:
+#             print(f"[DEBUG] {final_result['error']}")
+#         else:
+#             print(f"[DEBUG] Final status - Player ready: {final_result['playerReady']}")
+#             print(f"[DEBUG] Total messages: {len(final_result['allMessages'])}")
+#             print(f"[DEBUG] [Dc] messages ({len(final_result['dcMessages'])}")
+#             for msg in final_result['dcMessages']:
+#                 print(f"  - {msg}")
+#             print(f"[DEBUG] Player-related messages ({len(final_result['playerMessages'])}):")
+#             for msg in final_result['playerMessages']:
+#                 print(f"  - {msg}")
+                
+#     except Exception as e:
+#         print(f"[ERROR] Final diagnosis failed: {e}")
+    
+#     raise TimeoutError(f"Player ready not detected within {timeout} seconds")
 
 def collect_network_metrics(page, target_domain = "calls7.com"):
     client = page.context.new_cdp_session(page)

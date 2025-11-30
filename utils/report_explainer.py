@@ -60,6 +60,7 @@ def explain_metric_value(value, metric_name: str) -> str:
 
 
 def generate_human_readable_report(report: dict) -> str:
+    """Составляет человекочитаемый отчет по одиночному запуску теста. Принимает словарь с метриками"""
     film_url = report.get("film_url", "").strip()
     is_problematic_flow = report.get("is_problematic_flow", False)
 

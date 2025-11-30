@@ -23,7 +23,6 @@ class BaseUserFlowTest:
                 page.wait_for_load_state("networkidle")
             except PlaywrightTimeoutError as e:
                 raise
-                # pytest.fail(f"Не удалось загрузить {self.BASE_URL}", pytrace=False)
 
     def _goto_film_page_and_init_player(self, page, film_url):
         with allure.step(f"Переходим на страницу фильма и инициализируем плеер для {film_url}"):
@@ -53,7 +52,6 @@ class BaseUserFlowTest:
                 page.click(self.SELECTORS["video_element"])
             except Exception as e:
                 raise
-                # pytest.fail(f"Ошибка при запуске видео: {e}", pytrace=False)
                 
     def _collect_buffering_metrics(self, page):
         with allure.step("Собрать метрики буферизации"):
@@ -129,7 +127,6 @@ class BaseUserFlowTest:
                     return {"buttonsCpAvailable": False, "buttonsClickSuccess": False}
             except PlaywrightTimeoutError:
                 raise
-                # pytest.fail("Клик по кнопке оплаты не удался", pytrace=False)
                 
     def _wait_for_payment_form(self, page, iframe, pay_method):
         with allure.step("Проверить появление формы оплаты"):
@@ -195,10 +192,6 @@ class BaseUserFlowTest:
             lh_report = run_lighthouse_for_url(url)
         except Exception as e:
             raise
-            # if "timed out" in str(e) or "Timeout" in str(e):
-            #     pytest.fail(f"Lighthouse не ответил для {url}", pytrace=False)
-            # else:
-            #     raise
         lh_metrics = extract_metrics_from_lighthouse(lh_report)
             
         ppi = config.calculate_page_performance_index(
@@ -310,14 +303,14 @@ class BaseUserFlowTest:
         
         try:
             
-            if self.DOMAIN_NAME == "calls7":
-                # --- Шаг 1: Главная страница
+            if self.DOMAIN_NAME == "calls7" or self.DOMAIN_NAME == "tests.goodmovie":
+                # 1. Главная страница
                 if extra_steps and "main_page" in extra_steps:
                     extra_steps["main_page"](page, request, report)
                 else:
                     self._goto_main_page(page, request, report)
 
-            # --- Шаг 2: Страница фильма
+            # 2. Страница фильма
             film_metrics = self._goto_film_page_and_init_player(page, get_film_url)
             report["steps"]["film_page"] = film_metrics
 
@@ -328,18 +321,18 @@ class BaseUserFlowTest:
             scenario = detect_video_scenario(page)
             report["video_scenario"] = scenario
 
-            # --- Шаг 4: Буферизация
+            # 4. Буферизация
             buffer_metrics = self._collect_buffering_metrics(page)
             report["steps"]["film_page"].update(buffer_metrics)
             
             self._start_video_and_collect_metrics(page, scenario)
 
-            # --- Шаг 5: Попап
+            # 5. Попап
             popup_metrics = self._wait_for_popup_and_click(page, request, report)
             report["steps"]["film_page"].update(popup_metrics)
             iframe_start = time.time()
 
-            # --- Шаг 6: Оплата
+            # 6. Оплата
             iframe = page.frame_locator(self.SELECTORS["payment_iframe"])
             payment_meta = self._collect_payment_metrics(page, iframe_start, request, report)
             report["steps"]["pay_page"] = payment_meta
@@ -353,6 +346,7 @@ class BaseUserFlowTest:
             payment_form_appear = self._wait_for_payment_form(page, iframe, pay_method)
             report["steps"]["pay_page"].update(payment_form_appear)
             
+            # 7. Повторная загрузка попапа
             vidu_popup = self._load_popup_after_closing_pay_form(page, iframe)
             retry_payment = self._retry_payment_from_vidu_popup(page)
             report["steps"]["after_payment_popup"] = {
@@ -363,12 +357,13 @@ class BaseUserFlowTest:
             }
             report["error"] = retry_payment.get("error")
             
+            # 8. Повторная загрузка видео
             film_metrics_after_return = self._goto_film_page_and_init_player(page, get_film_url)
             report["steps"]["after_return_without_payment"] = {
                 "playerInitTime": film_metrics_after_return.get("playerInitTime"),
                 "videoStartTime": film_metrics_after_return.get("videoStartTime"),
             }
-            # --- Завершение
+            # Завершение
             if log_issues_if_any(report):
                 report["is_problematic_flow"] = True
             request.node._report_data = report
