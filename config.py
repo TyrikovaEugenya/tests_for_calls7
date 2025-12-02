@@ -8,7 +8,7 @@ from typing import Dict, Tuple, Optional, List
 BASE_URL = "https://calls7.com"
 
 # === Путь до хромиума, установить после установки версии с кодеками ===
-CHROMIUM_PATH = "/home/eugene/.cache/ms-playwright/chromium-1187/chrome-linux/chrome"
+CHROMIUM_PATH = "/opt/chromium/chrome"
 
 # === КОНФИГУРАЦИЯ СЕЛЕКТОРОВ ===
 SELECTORS: Dict[str, str] = {
@@ -16,15 +16,16 @@ SELECTORS: Dict[str, str] = {
     "play_button": ".plyr__control--overlaid",
     "video_element": ".plyr--video",
     "popup": "#dcoverlay",
-    "popup_cta": "#dcoverlay a.dialog",
-    "payment_iframe": "iframe[src*='cloudpayments']",
+    "popup_cta": "#dialog-link.dialog",
+    "payment_iframe": "iframe[src='https://widget.cloudpayments.ru/next/app/widget']",
     "pay_button_in_iframe": "#cta-button",
     "pay_button_bank_card": "button[data-test='cardpay-page-button']",
     "pay_button_sbp": "button[data-test='sbppay-button']",
     "pay_button_tpay": "[data-testid='tpay-form'], .tpay-input",
     "pay_form_bank_card": "tui-input-card-group[data-test='input-card-groupped']",
     "pay_form_sbp": "img.qr-box",
-    "close_button": "img[data-test='close-button']"
+    "close_button": "img[data-test='close-button']",
+    "vidu_popup": "#cta"
 }
 """Словарь CSS-селекторов для элементов интерфейса"""
 

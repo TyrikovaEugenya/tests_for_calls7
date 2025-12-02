@@ -22,7 +22,7 @@ from config import (
 )
 import aggregator
 
-# CHROMIUM_PATH = "/opt/chromium/chrome"
+# CHROMIUM_PATH = "/opt/chromium/chrome" / "/home/eugene/.cache/ms-playwright/chromium-1187/chrome-linux/chrome"
 
 # === КОНФИГУРАЦИЯ ГЕОЛОКАЦИЙ ===
 geo_map: Dict[str, Tuple[str, str]] = {
@@ -355,7 +355,7 @@ def page(browser_type, device, geo, throttling, browser_instance, playwright_ins
                         if (message.includes('loadPlayer finished')) {
                             window.__playerReadyDetected = true;
                             window.__playerReadyTimestamp = Date.now();
-                            console.log('[MONITOR] 🎯 Player ready detected!');
+                            console.log('[MONITOR] Player ready detected!');
                         }
                         
                         // Вызываем оригинальный метод
@@ -536,7 +536,6 @@ def aggregate_reports() -> dict:
         "Problematic pages": f"{problematic} ({problematic/total*100:.1f}%)",
         "Failed by errors": f"{failed} ({failed/total*100:.1f}%)",
         "Quality score": f"{quality_score}%",
-        # Ключевые проблемы — кратко, в одну строку
         "film_page.videoStartTime > 15 sec": f"{video_slow} ({video_slow/total*100:.1f}%)",
         "main_page.LCP > 2500 ms": f"{lcp_bad} ({lcp_bad/total*100:.1f}%)",
         "pay_page.iframeCpLoadTime > 3 sec": f"{iframe_slow} ({iframe_slow/total*100:.1f}%)",

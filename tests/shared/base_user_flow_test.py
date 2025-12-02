@@ -27,7 +27,9 @@ class BaseUserFlowTest:
     def _goto_film_page_and_init_player(self, page, film_url):
         with allure.step(f"Переходим на страницу фильма и инициализируем плеер для {film_url}"):
             try:
+                page.evaluate("() => { localStorage.setItem('vidu_log', '1'); }")
                 page.goto(film_url)
+                
                 player_ready_time = round(self._wait_for_player_simple(page, timeout=30) * 1000)
                 print(f"[DEBUG] After wait_for_player_simple: {player_ready_time} (type: {type(player_ready_time)})")
                 player_start = time.time()
@@ -66,11 +68,12 @@ class BaseUserFlowTest:
         with allure.step("Дождаться появления попапа оплаты и кликнуть"):
             try:
                 popup_start = time.time()
-                popup_locator = page.locator(self.SELECTORS["popup_cta"])
-                popup_locator.wait_for(state="visible", timeout=90000)
+                popup = page.locator(self.SELECTORS["popup"])
+                popup.wait_for(state="visible", timeout=90000)
                 popup_time_ms = round((time.time() - popup_start) * 1000)
-
-                if popup_locator.is_visible() and popup_locator.is_enabled():
+                popup_locator = page.locator(self.SELECTORS["popup_cta"])
+                
+                if popup_locator:
                     try:
                         popup_locator.click(timeout=5000)
                         return {
@@ -96,7 +99,7 @@ class BaseUserFlowTest:
     def _collect_payment_metrics(self, page, iframe_start_time, request, report):
         with allure.step("На странице оплаты собрать метрики"):
             try:
-                page.wait_for_selector(self.SELECTORS["payment_iframe"], state="attached", timeout=15000)
+                iframe = page.frame_locator(self.SELECTORS["payment_iframe"])
                 iframe_load_time_ms = round((time.time() - iframe_start_time) * 1000)
                 return {
                     "iframeCpLoadTime": iframe_load_time_ms
@@ -116,7 +119,7 @@ class BaseUserFlowTest:
                         bank_card_button = iframe.locator(self.SELECTORS["pay_button_sbp"])
                     case "tpay":
                         bank_card_button = iframe.locator(self.SELECTORS["pay_button_tpay"])
-                bank_card_button.wait_for(state="visible", timeout=30000)
+                # bank_card_button.wait_for(state="visible", timeout=30000)
                 if bank_card_button.is_visible() and bank_card_button.is_enabled():
                     bank_card_button.locator("tui-loader:not([aria-busy='true'])").first.wait_for(
                         state="attached", timeout=10000
@@ -147,7 +150,7 @@ class BaseUserFlowTest:
             try:
                 start_time = time.time()
                 iframe.locator(self.SELECTORS["close_button"]).click(timeout=10000)
-                page.locator(self.SELECTORS["pay_button_in_iframe"]).wait_for(state="visible", timeout=30000)
+                page.locator(self.SELECTORS["vidu_popup"]).wait_for(state="visible", timeout=30000)
                 popup_load_time_ms = round((time.time() - start_time) * 1000)
                 return {
                     "popupReloadTime": popup_load_time_ms,
@@ -160,7 +163,7 @@ class BaseUserFlowTest:
                     "error": str(e)
                 }
             
-    def _retry_payment_from_vidu_popup(self, page) -> dict:
+    def _retry_payment_from_vidu_popup(self, page, iframe) -> dict:
         """
         Нажимает «Оплатить доступ сейчас» и ждёт новую форму оплаты.
         Возвращает: {"loadTime": int, "success": bool}
@@ -171,7 +174,7 @@ class BaseUserFlowTest:
                 retry_btn = page.locator(self.SELECTORS["pay_button_in_iframe"])
                 retry_btn.wait_for(state="visible", timeout=5000)
                 iframe_start = time.time()
-                retry_btn.click(timeout=5000)
+                retry_btn.click(timeout=30000)
 
                 # Ждём iframe
                 page.wait_for_selector(self.SELECTORS["payment_iframe"], timeout=15000)
@@ -270,6 +273,41 @@ class BaseUserFlowTest:
             print(f"[DEBUG] Final check failed: {e}")
         
         raise TimeoutError(f"Player not ready within {timeout}s")
+    
+    def _enable_vidu_logging(self, page):
+        """
+        Включает расширенное логирование Vidu через localStorage.
+        """
+        try:
+            # Устанавливаем флаг логирования в localStorage
+            page.evaluate("() => { localStorage.setItem('vidu_log', '1'); }")
+            
+            # Также можно установить другие флаги для максимальной детализации
+            page.evaluate("""
+                () => {
+                    // Основной флаг логирования Vidu
+                    localStorage.setItem('vidu_log', '1');
+                    
+                    // Дополнительные флаги (если известны)
+                    localStorage.setItem('vidu_debug', '1');
+                    localStorage.setItem('player_debug', '1');
+                    localStorage.setItem('debug', 'true');
+                    
+                    // Флаги для различных компонентов
+                    localStorage.setItem('debug_player', '1');
+                    localStorage.setItem('debug_ads', '1');
+                    localStorage.setItem('debug_analytics', '1');
+                    
+                    console.log('[Vidu Logging] Расширенное логирование включено');
+                }
+            """)
+            
+            print("[INFO] Расширенное логирование Vidu включено")
+            return True
+            
+        except Exception as e:
+            print(f"[WARNING] Не удалось включить логирование Vidu: {e}")
+            return False
                 
     # Основной метод — шаблонный метод (template method)
     def run_user_flow(self, page, get_film_url, device, throttling, geo, browser_type, pay_method, request, extra_steps=None):
@@ -311,8 +349,16 @@ class BaseUserFlowTest:
                     self._goto_main_page(page, request, report)
 
             # 2. Страница фильма
-            film_metrics = self._goto_film_page_and_init_player(page, get_film_url)
-            report["steps"]["film_page"] = film_metrics
+            try:
+                film_metrics = self._goto_film_page_and_init_player(page, get_film_url)
+                report["steps"]["film_page"] = film_metrics
+            except Exception as e:
+                print(f"Не удалось собрать метрики видеоплеера: {e}")
+                report["steps"]["film_page"] = {
+                    "playerInitTime": None,
+                    "videoStartTime": None  
+                }
+                
 
             if extra_steps and "film_page_before_video" in extra_steps:
                 extra_steps["film_page_before_video"](page, request, report)
@@ -348,21 +394,29 @@ class BaseUserFlowTest:
             
             # 7. Повторная загрузка попапа
             vidu_popup = self._load_popup_after_closing_pay_form(page, iframe)
-            retry_payment = self._retry_payment_from_vidu_popup(page)
+            retry_payment = self._retry_payment_from_vidu_popup(page, iframe)
             report["steps"]["after_payment_popup"] = {
                 "viduPopupAppearTime": vidu_popup.get("popupReloadTime"),
                 "viduPopupSuccess": vidu_popup.get("popupIsVisibleAfterReload"),
                 "retryPaymentLoadTime": retry_payment.get("loadTime"),
                 "retryPaymentSuccess": retry_payment.get("success"),
             }
-            report["error"] = retry_payment.get("error")
+            report["error"] = vidu_popup.get("error")
             
             # 8. Повторная загрузка видео
-            film_metrics_after_return = self._goto_film_page_and_init_player(page, get_film_url)
-            report["steps"]["after_return_without_payment"] = {
-                "playerInitTime": film_metrics_after_return.get("playerInitTime"),
-                "videoStartTime": film_metrics_after_return.get("videoStartTime"),
-            }
+            try:
+                film_metrics_after_return = self._goto_film_page_and_init_player(page, get_film_url)
+                report["steps"]["after_return_without_payment"] = {
+                    "playerInitTime": film_metrics_after_return.get("playerInitTime"),
+                    "videoStartTime": film_metrics_after_return.get("videoStartTime"),
+                }
+            except Exception as e:
+                print(f"Не удалось собрать метрики видеоплеера: {e}")
+                report["steps"]["film_page"] = {
+                    "playerInitTime": None,
+                    "videoStartTime": None  
+                }
+            
             # Завершение
             if log_issues_if_any(report):
                 report["is_problematic_flow"] = True
