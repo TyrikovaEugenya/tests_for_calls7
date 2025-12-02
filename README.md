@@ -54,14 +54,14 @@ brew install openjdk
 2. **Создайте виртуальное окружение**
 Перейдите в папку проекта, если еще не сделали этого (cd calls7-tests)
    ```bash
-   python -m venv venv
+   python3 -m venv venv
    source venv/bin/activate  # Linux/macOS
    venv\Scripts\activate  # Windows
    ```
 
 3. **Установите зависимости**
    ```bash
-   pip install -r requirements.txt
+   pip3 install -r requirements.txt
    ```
 
 4. **Установите браузеры Playwright**
