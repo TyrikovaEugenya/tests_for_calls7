@@ -22,7 +22,6 @@ from config import (
 )
 import aggregator
 
-# CHROMIUM_PATH = "/opt/chromium/chrome" / "/home/eugene/.cache/ms-playwright/chromium-1187/chrome-linux/chrome"
 
 # === КОНФИГУРАЦИЯ ГЕОЛОКАЦИЙ ===
 geo_map: Dict[str, Tuple[str, str]] = {
