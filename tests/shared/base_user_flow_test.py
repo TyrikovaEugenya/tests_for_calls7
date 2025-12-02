@@ -349,15 +349,18 @@ class BaseUserFlowTest:
                     self._goto_main_page(page, request, report)
 
             # 2. Страница фильма
-            try:
-                film_metrics = self._goto_film_page_and_init_player(page, get_film_url)
-                report["steps"]["film_page"] = film_metrics
-            except Exception as e:
-                print(f"Не удалось собрать метрики видеоплеера: {e}")
-                report["steps"]["film_page"] = {
-                    "playerInitTime": None,
-                    "videoStartTime": None  
-                }
+            if browser_type == "chromium":
+                try:
+                    film_metrics = self._goto_film_page_and_init_player(page, get_film_url)
+                    report["steps"]["film_page"] = film_metrics
+                except Exception as e:
+                    print(f"Не удалось собрать метрики видеоплеера: {e}")
+                    report["steps"]["film_page"] = {
+                        "playerInitTime": None,
+                        "videoStartTime": None  
+                    }
+            else:
+                page.goto(get_film_url)
                 
 
             if extra_steps and "film_page_before_video" in extra_steps:
@@ -369,7 +372,10 @@ class BaseUserFlowTest:
 
             # 4. Буферизация
             buffer_metrics = self._collect_buffering_metrics(page)
-            report["steps"]["film_page"].update(buffer_metrics)
+            if "film_page" in report["steps"]:
+                report["steps"]["film_page"].update(buffer_metrics)
+            else:
+                report["steps"]["film_page"] = buffer_metrics
             
             self._start_video_and_collect_metrics(page, scenario)
 
@@ -404,18 +410,20 @@ class BaseUserFlowTest:
             report["error"] = vidu_popup.get("error")
             
             # 8. Повторная загрузка видео
-            try:
-                film_metrics_after_return = self._goto_film_page_and_init_player(page, get_film_url)
-                report["steps"]["after_return_without_payment"] = {
-                    "playerInitTime": film_metrics_after_return.get("playerInitTime"),
-                    "videoStartTime": film_metrics_after_return.get("videoStartTime"),
-                }
-            except Exception as e:
-                print(f"Не удалось собрать метрики видеоплеера: {e}")
-                report["steps"]["film_page"] = {
-                    "playerInitTime": None,
-                    "videoStartTime": None  
-                }
+            if browser_type == "chromium":
+                try:
+                    film_metrics_after_return = self._goto_film_page_and_init_player(page, get_film_url)
+                    report["steps"]["after_return_without_payment"] = {
+                        "playerInitTime": film_metrics_after_return.get("playerInitTime"),
+                        "videoStartTime": film_metrics_after_return.get("videoStartTime"),
+                    }
+                except Exception as e:
+                    print(f"Не удалось собрать метрики видеоплеера: {e}")
+                    report["steps"]["film_page"] = {
+                        "playerInitTime": None,
+                        "videoStartTime": None  
+                    }
+            
             
             # Завершение
             if log_issues_if_any(report):

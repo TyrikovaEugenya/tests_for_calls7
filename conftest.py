@@ -44,7 +44,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         '--film-url',
         action='store',
-        default="https://calls7.com/movie/370",
+        default="https://tests.goodmovie.net/kulinarnyy-tehnikum/6110",
         help="URL фильма для тестирования (по умолчанию: демо фильм)"
     )
     parser.addoption(
@@ -245,7 +245,7 @@ def browser_instance(playwright_instance, browser_type):
     p = playwright_instance
     if browser_type == "chromium":
             browser = p.chromium.launch(
-                headless=True,
+                headless=False,
                 executable_path=CHROMIUM_PATH,
                 args=[
                     "--no-sandbox",
@@ -550,6 +550,12 @@ def pytest_sessionfinish(session, exitstatus):
     env_path.mkdir(exist_ok=True)
         
     env = aggregate_reports()
+    
+    # Проверяем, что env не None и является словарем
+    if not env or not isinstance(env, dict):
+        print(f"⚠️  aggregate_reports() вернул: {env}. Записываем пустой environment.")
+        env = {}
+    
     with open(env_path / "environment.properties", "w", encoding="utf-8") as f:
         for key, value in env.items():
             # Экранируем знаки = и \ в значениях (Allure требует)

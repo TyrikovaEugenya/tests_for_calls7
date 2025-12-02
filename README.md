@@ -113,14 +113,12 @@ mv ChromiumApp/chrome-mac/Chromium.app ~/Applications/Chromium/
 CHROMIUM_PATH = '/Users/ВАШЕ_ИМЯ_ПОЛЬЗОВАТЕЛЯ/Applications/Chromium/Chromium.app/Contents/MacOS/Chromium'
 Чтобы узнать имя пользователя используйте команду whoami
 8. Установить **Node.js**
+
 ```Shell
 brew install node
 node --version
 npm --version
 
-sudo apt install -y npm
-sudo npm install -g n
-sudo n latest
 ```
 9. Установить **Lighthouse**
 ```Shell
@@ -149,17 +147,51 @@ source ~/.zshrc
 ---
 ## Запуск тестов
 
-### Минимальный запуск (по умолчанию)
+Для проверки работоспособности запускайте тесты по одному, для показательных отчетов - параметризованные.
+Подробности о возможных опциях можно найти в документации файла conftest.py.
+
+### Минимальный запуск для одного фильма (страница по умолчанию)
+Для браузера Firefox (для Webkit в опции --browser указать webkit)
 ```bash
-python -m pytest tests/ --alluredir=./allure-results -v
+python -m pytest --browser=firefox --pay-method=sbp -m "domain_goodmovie and browser_firefox and single_run" --alluredir=./allure-results -v
 ```
 
- Тест автоматически использует URL фильма из фикстуры pytest_addoption (`conftest.py`).  
+Для браузера Chromium
+```bash
+python -m pytest --browser=chromium --pay-method=sbp -m "domain_goodmovie and browser_chromium and single_run" --alluredir=./allure-results -v
+```
+Тест автоматически использует URL фильма из фикстуры pytest_addoption (`conftest.py`).  
 Чтобы задать свой URL, см. раздел «Запуск с кастомным URL».
+
+### Запуск параметризованных тестов по браузерам (для одной страницы)
+Предупреждение: параметризация позволяет составлять все возможные комбинации входных параметров, тестов создается и запускаестся много, на каждый такой запуск может потребоваться до часа. Эти тесты рекомендуется запускать при уверенности, что сборка работает. 
+```bash
+# Chromium
+python -m pytest --pay-method=sbp -m "domain_goodmovie and parametrized and browser_chromium" --alluredir=./allure-results -v
+# Firefox и Webkit
+python -m pytest --pay-method=sbp -m "domain_goodmovie and parametrized and browser_firefox" --alluredir=./allure-results -v
+```
+
+### Запуск тестов для нескольких страниц фильмов
+Для запуска тестов для набора страниц из файла использйте опции --film-list (путь до файла со списком) и --film-limit (количество страниц из списка).
+Не рекомендуется использовать одновременно с маркером parametrized, так как продолжительность тестов вырастает.
+Пример запуска:
+
+```bash
+python -m pytest --film-list=data/goodmovie_films.json --film-limit=3 --pay-method=sbp -m "domain_goodmovie and browser_chromium and single_run" --alluredir=./allure-results -v -s
+```
+
+### Запуск с кастомным URL фильма
+
+Чтобы протестировать конкретный фильм, укажите его URL через параметр `--film-url`:
+
+```bash
+python -m pytest --film-url=https://tests.goodmovie.net/kulinarnyy-tehnikum/6110 --pay-method=sbp -m "domain_goodmovie and browser_chromium and single_run" --alluredir=./allure-results -v
+```
 
 ---
 
-## Генерация и просмотр отчёта
+## Генерация и просмотр отчёта Allure
 
 После завершения теста выполните:
 
@@ -179,16 +211,11 @@ python3 -m http.server 8000
 rm -rf allure-results allure-report reports
 ```
 
----
-
-## Запуск с кастомным URL фильма
-
-Чтобы протестировать конкретный фильм, укажите его URL через параметр `--film-url`:
-
-```bash
-python -m pytest tests/ \
-  --film-url="https://calls7.com/kvest/5654" \
-  --alluredir=./allure-results -v
-```
+## Просмотр отчетов в челокечитаемом формате
+После завершения теста генерируются отчеты в папке reports.
+Для просмотра файлов в формате .md вам может понадобиться скачать приложение (или воспользуйтесь онлайн ридерами).
+- RUN_SUMMARY* - предоставляет основную информацию по запуску.
+- CLUSTER_COMPARISON* - отчет по кластерам.
+- issues.log - информация об ошибках для разработчиков.
 
 ---
