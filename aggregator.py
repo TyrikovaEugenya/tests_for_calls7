@@ -444,7 +444,7 @@ class MultiTestRunAggregator:
     def get_clustered_summaries(self, test_name: str, cluster_by: list = None) -> dict:
         """Возвращает сводки, сгруппированные по указанным параметрам"""
         if cluster_by is None:
-            cluster_by = ["device", "throttling", "geoposition", "browser_type"]
+            cluster_by = ["device", "throttling", "geoposition", "browser_type", "flow_branch"]
         
         cache_key = f"{test_name}_{'_'.join(sorted(cluster_by))}"
         if cache_key in self.cluster_cache:

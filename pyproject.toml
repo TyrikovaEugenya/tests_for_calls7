@@ -10,6 +10,7 @@ testpaths = ["tests"]
 markers = [
     "performance: сбор метрик",
     "user_flow: полный сценарий",
+    "phone_branches: тесты для веток с телефоном",
     "parametrized",
     "single_run",
     "domain_goodmovie",
