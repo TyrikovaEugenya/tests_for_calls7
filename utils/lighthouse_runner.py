@@ -13,7 +13,7 @@ def run_lighthouse_for_url(url: str, timeout_sec: int = 60) -> dict:
         output = Path(tmp) / "lh_report.json"
         
         chrome_proc = subprocess.Popen([
-            config.CHROMIUM_PATH,
+            chromium_path,
             "--headless=new",
             "--no-sandbox",
             "--disable-gpu",
@@ -36,7 +36,7 @@ def run_lighthouse_for_url(url: str, timeout_sec: int = 60) -> dict:
             "--quiet",
             f"--chrome-path={chromium_path}",
             "--only-categories=performance",
-            "--throttling-method=provided"  # используем сеть из Playwright (если настроена)
+            "--throttling-method=provided"
         ]
 
         try:

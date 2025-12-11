@@ -21,7 +21,7 @@ class TestGoodmovieUserFlow(BaseUserFlowTest):
     @pytest.mark.parametrize("pay_method", config.PAY_METHODS, scope="function")
     @allure.story("User Flow: Главная → Фильм → Плеер → Попап → Оплата")
     @allure.title("Полный user flow с Lighthouse (chromium)")
-    def test_user_flow_chromium(self, page, get_film_url, device, throttling, geo, browser_type, pay_method, request):
+    def test_user_flow_chromium(self, page, get_film_url, device, throttling, geo, browser_type, pay_method, request, phone_branch):
         def main_page_step(page, request, report):
             dns_metrics = metrics.collect_network_metrics(page)
             self._goto_main_page(page, request, report)
@@ -46,7 +46,7 @@ class TestGoodmovieUserFlow(BaseUserFlowTest):
                 report["is_problematic_flow"] = True
 
         self.run_user_flow(
-            page, get_film_url, device, throttling, geo, browser_type, pay_method, request,
+            page, get_film_url, device, throttling, geo, browser_type, pay_method, request, phone_branch,
             extra_steps={
                 "main_page": main_page_step,
                 "film_page_before_video": film_page_step
@@ -65,8 +65,8 @@ class TestGoodmovieUserFlow(BaseUserFlowTest):
     @pytest.mark.parametrize("pay_method", config.PAY_METHODS, scope="function")
     @allure.story("User Flow: Главная → Фильм → Плеер → Попап → Оплата")
     @allure.title("User flow без Lighthouse (firefox, webkit)")
-    def test_user_flow_non_chromium(self, page, get_film_url, device, throttling, geo, browser_type, pay_method, request):
-        self.run_user_flow(page, get_film_url, device, throttling, geo, browser_type, pay_method, request)
+    def test_user_flow_non_chromium(self, page, get_film_url, device, throttling, geo, browser_type, pay_method, request, phone_branch):
+        self.run_user_flow(page, get_film_url, device, throttling, geo, browser_type, pay_method, request, phone_branch)
         
 
     @pytest.mark.single_run
@@ -74,7 +74,7 @@ class TestGoodmovieUserFlow(BaseUserFlowTest):
     @pytest.mark.browser_chromium
     @allure.story("User Flow: Главная → Фильм → Плеер → Попап → Оплата")
     @allure.title("Полный user flow с Lighthouse (chromium), одиночный прогон")
-    def test_user_flow_chromium_single(self, page, get_film_url, device, throttling, geo, browser_type, pay_method, request):
+    def test_user_flow_chromium_single(self, page, get_film_url, device, throttling, geo, browser_type, pay_method, request, phone_branch):
         def main_page_step(page, request, report):
             dns_metrics = metrics.collect_network_metrics(page)
             self._goto_main_page(page, request, report)
@@ -99,7 +99,7 @@ class TestGoodmovieUserFlow(BaseUserFlowTest):
                 report["is_problematic_flow"] = True
 
         self.run_user_flow(
-            page, get_film_url, device, throttling, geo, browser_type, pay_method, request,
+            page, get_film_url, device, throttling, geo, browser_type, pay_method, request, phone_branch,
             extra_steps={
                 "main_page": main_page_step,
                 "film_page_before_video": film_page_step
@@ -112,5 +112,5 @@ class TestGoodmovieUserFlow(BaseUserFlowTest):
     @pytest.mark.browser_webkit
     @allure.story("User Flow: Главная → Фильм → Плеер → Попап → Оплата")
     @allure.title("User flow без Lighthouse (firefox, webkit), одиночный прогон")
-    def test_user_flow_non_chromium_single(self, page, get_film_url, device, throttling, geo, browser_type, pay_method, request):
-        self.run_user_flow(page, get_film_url, device, throttling, geo, browser_type, pay_method, request)
+    def test_user_flow_non_chromium_single(self, page, get_film_url, device, throttling, geo, browser_type, pay_method, request, phone_branch):
+        self.run_user_flow(page, get_film_url, device, throttling, geo, browser_type, pay_method, request, phone_branch)

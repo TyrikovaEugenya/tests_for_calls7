@@ -18,7 +18,7 @@ from pathlib import Path
 import requests
 import config
 from config import (
-    DEVICES, THROTTLING_MODES, GEO_LOCATIONS, BROWSERS, PAY_METHODS, CHROMIUM_PATH
+    DEVICES, THROTTLING_MODES, GEO_LOCATIONS, BROWSERS, PAY_METHODS, CHROMIUM_PATH, PHONE_BRANCHES
 )
 import aggregator
 
@@ -94,6 +94,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         choices=PAY_METHODS,
         help="Метод оплаты для тестирования"    
     )
+    parser.addoption(
+        "--phone-branch",
+        action="store",
+        default="valid",
+        choices=PHONE_BRANCHES,
+        help="Тип вводимого номера телефона"
+    )
 
 # === ФИКСТУРЫ ДЛЯ ПАРАМЕТРОВ ТЕСТИРОВАНИЯ ===
 @pytest.fixture()
@@ -135,6 +142,11 @@ def film_limit(request: pytest.FixtureRequest) -> str:
 def pay_method(request: pytest.FixtureRequest) -> str:
     """Возвращает метод оплаты для тестирования."""
     return request.config.getoption("--pay-method")
+
+@pytest.fixture()
+def phone_branch(request: pytest.FixtureRequest) -> str:
+    """Возвращает тип ввводимого номера телефона."""
+    return request.config.getoption("--phone-branch")
 
 # === УТИЛИТЫ ДЛЯ РАБОТЫ С ФАЙЛАМИ ===
 def load_film_urls(film_list_path: str, limit: Optional[int] = None) -> List[str]:
@@ -186,8 +198,9 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     geo = metafunc.config.getoption("--geo")
     browser = metafunc.config.getoption("--browser")
     payment_method = metafunc.config.getoption("--pay-method")
+    phone_branch = metafunc.config.getoption("--phone-branch")
     # Проверяем, используются ли CLI опции
-    use_cli = any([device, throttling, geo, browser, payment_method])
+    use_cli = any([device, throttling, geo, browser, payment_method, phone_branch])
     # Параметризация если не используются CLI опции
     if not use_cli:
         if "device" in metafunc.fixturenames:
@@ -200,6 +213,8 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             metafunc.parametrize("browser_type", BROWSERS, scope="session")
         if "pay_method" in metafunc.fixturenames:
             metafunc.parametrize("pay_method", PAY_METHODS, scope="function")
+        if "phone_branch" in metafunc.fixturenames:
+            metafunc.parametrize("phone_branch", PHONE_BRANCHES, scope="function")
 
     # Обработка URL фильмов
     film_url = metafunc.config.getoption("--film-url")
@@ -244,7 +259,7 @@ def browser_instance(playwright_instance, browser_type):
     p = playwright_instance
     if browser_type == "chromium":
             browser = p.chromium.launch(
-                headless=False,
+                headless=config.HEADLESS_OPTION,
                 executable_path=CHROMIUM_PATH,
                 args=[
                     "--no-sandbox",

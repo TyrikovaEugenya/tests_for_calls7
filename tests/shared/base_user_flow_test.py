@@ -1,5 +1,6 @@
 import json
 import time
+import random
 from pathlib import Path
 import pytest
 import allure
@@ -63,6 +64,56 @@ class BaseUserFlowTest:
                 "rebufferCount": rebuffer_count,
                 "rebufferDuration": round(rebuffer_duration)
             }
+        
+    def _wait_for_phone_popup_and_fill(self, page, phone_branch: str):
+        try:
+            popup_start = time.time()
+            phone_popup = page.locator(self.SELECTORS["phone_popup_form"])
+            phone_popup.wait_for(state="visible", timeout=90000)
+            popup_time_ms = round((time.time() - popup_start) * 1000)
+            popup_input = page.locator(self.SELECTORS["phone_input"])
+            if popup_input:
+                try:
+                    # В зависимости от ветки заполняем номер телефона
+                    if phone_branch != "paid":
+                        phone_number = self._generate_phone_number(phone_branch)
+                    else:
+                        phone_number = config.TEST_PHONE_NUMBER
+                    popup_input.fill(phone_number)
+                    phone_submit_button = page.locator(self.SELECTORS["phone_submit"])
+                    phone_submit_button.wait_for(state="attached", timeout=10000)
+                    phone_submit_button.click(force=True)
+                    return {
+                            "popupAppearTime": popup_time_ms,
+                            "popupAvailable": True,
+                            "popupClickSuccess": True
+                        }
+                except:
+                    return {
+                            "popupAppearTime": popup_time_ms,
+                            "popupAvailable": True,
+                            "popupClickSuccess": False
+                        }
+            else:
+                return {
+                            "popupAppearTime": None,
+                            "popupAvailable": False,
+                            "popupClickSuccess": False
+                        }
+        except PlaywrightTimeoutError:
+            raise
+        
+    def _generate_phone_number(self, phone_branch: str = "valid") -> str:
+        """Генерация номеров телефона"""
+        
+        operators = {
+            "valid": ["79", "79"],  # МТС, Мегафон
+            "invalid": ["73", "74"]  # Несуществующие операторы
+        }
+        
+        prefix = random.choice(operators.get(phone_branch, ["79"]))
+        number = ''.join([str(random.randint(0, 9)) for _ in range(9)])
+        return f"{prefix}{number}"
         
     def _wait_for_popup_and_click(self, page, request, report):
         with allure.step("Дождаться появления попапа оплаты и кликнуть"):
@@ -310,7 +361,7 @@ class BaseUserFlowTest:
             return False
                 
     # Основной метод — шаблонный метод (template method)
-    def run_user_flow(self, page, get_film_url, device, throttling, geo, browser_type, pay_method, request, extra_steps=None):
+    def run_user_flow(self, page, get_film_url, device, throttling, geo, browser_type, pay_method, request,  phone_branch, extra_steps=None):
         """
         Общий сценарий. extra_steps — словарь с кастомными шагами: 
         {"main_page": func, "film_page_before_video": func}
@@ -323,6 +374,7 @@ class BaseUserFlowTest:
             "throttling": throttling,
             "geoposition": geo,
             "browser_type": browser_type,
+            "phone_branch": phone_branch,
             "steps": {},
             "is_problematic_flow": False,
             "error": None
@@ -334,7 +386,8 @@ class BaseUserFlowTest:
             f"**Сеть**: {throttling}\n"
             f"**ГЕО**: {geo}\n"
             f"**Браузер**: {browser_type}\n"
-            f"**Способ оплаты**: {pay_method}"
+            f"**Способ оплаты**: {pay_method}\n"
+            f"**Вариант телефона**: {phone_branch}\n"
         )
         
         request.node._report_data = report
@@ -378,51 +431,65 @@ class BaseUserFlowTest:
                 report["steps"]["film_page"] = buffer_metrics
             
             self._start_video_and_collect_metrics(page, scenario)
-
+            # Подключаем обработчик дилогового окна до клика
+            message = page.on("dialog", lambda dialog: dialog.message)
             # 5. Попап
-            popup_metrics = self._wait_for_popup_and_click(page, request, report)
+            popup_metrics = self._wait_for_phone_popup_and_fill(page, phone_branch)
+            sms_code_time_start = time.time()
             report["steps"]["film_page"].update(popup_metrics)
-            iframe_start = time.time()
-
-            # 6. Оплата
-            iframe = page.frame_locator(self.SELECTORS["payment_iframe"])
-            payment_meta = self._collect_payment_metrics(page, iframe_start, request, report)
-            report["steps"]["pay_page"] = payment_meta
-
-            if extra_steps and "pay_page_before_click" in extra_steps:
-                extra_steps["pay_page_before_click"](page, request, report)
-
-            button_metrics = self._check_payment_button_click(page, iframe, pay_method)
-            report["steps"]["pay_page"].update(button_metrics)
-
-            payment_form_appear = self._wait_for_payment_form(page, iframe, pay_method)
-            report["steps"]["pay_page"].update(payment_form_appear)
             
-            # 7. Повторная загрузка попапа
-            vidu_popup = self._load_popup_after_closing_pay_form(page, iframe)
-            retry_payment = self._retry_payment_from_vidu_popup(page, iframe)
-            report["steps"]["after_payment_popup"] = {
-                "viduPopupAppearTime": vidu_popup.get("popupReloadTime"),
-                "viduPopupSuccess": vidu_popup.get("popupIsVisibleAfterReload"),
-                "retryPaymentLoadTime": retry_payment.get("loadTime"),
-                "retryPaymentSuccess": retry_payment.get("success"),
-            }
-            report["error"] = vidu_popup.get("error")
             
-            # 8. Повторная загрузка видео
-            if browser_type == "chromium":
-                try:
-                    film_metrics_after_return = self._goto_film_page_and_init_player(page, get_film_url)
-                    report["steps"]["after_return_without_payment"] = {
-                        "playerInitTime": film_metrics_after_return.get("playerInitTime"),
-                        "videoStartTime": film_metrics_after_return.get("videoStartTime"),
-                    }
-                except Exception as e:
-                    print(f"Не удалось собрать метрики видеоплеера: {e}")
-                    report["steps"]["film_page"] = {
-                        "playerInitTime": None,
-                        "videoStartTime": None  
-                    }
+
+            # 6. Оплата или смс
+            if phone_branch == "paid":
+                sms_code_form = page.locator(config.SELECTORS[""])
+                sms_code_form_metric = {
+                    "smsFormTime": round((time.time() - sms_code_time_start) * 100)
+                }
+                report["steps"]["film_page"].update(sms_code_form_metric)
+                assert sms_code_form, "Не появилась форма ввода смс кода"
+            elif phone_branch == "invalid":
+                assert message is not None, "Не появилось диалоговое окно"
+            else:
+                iframe_start = time.time()
+                iframe = page.frame_locator(self.SELECTORS["payment_iframe"])
+                payment_meta = self._collect_payment_metrics(page, iframe_start, request, report)
+                report["steps"]["pay_page"] = payment_meta
+
+                if extra_steps and "pay_page_before_click" in extra_steps:
+                    extra_steps["pay_page_before_click"](page, request, report)
+
+                button_metrics = self._check_payment_button_click(page, iframe, pay_method)
+                report["steps"]["pay_page"].update(button_metrics)
+
+                payment_form_appear = self._wait_for_payment_form(page, iframe, pay_method)
+                report["steps"]["pay_page"].update(payment_form_appear)
+                
+                # 7. Повторная загрузка попапа
+                vidu_popup = self._load_popup_after_closing_pay_form(page, iframe)
+                retry_payment = self._retry_payment_from_vidu_popup(page, iframe)
+                report["steps"]["after_payment_popup"] = {
+                    "viduPopupAppearTime": vidu_popup.get("popupReloadTime"),
+                    "viduPopupSuccess": vidu_popup.get("popupIsVisibleAfterReload"),
+                    "retryPaymentLoadTime": retry_payment.get("loadTime"),
+                    "retryPaymentSuccess": retry_payment.get("success"),
+                }
+                report["error"] = vidu_popup.get("error")
+                
+                # 8. Повторная загрузка видео
+                if browser_type == "chromium":
+                    try:
+                        film_metrics_after_return = self._goto_film_page_and_init_player(page, get_film_url)
+                        report["steps"]["after_return_without_payment"] = {
+                            "playerInitTime": film_metrics_after_return.get("playerInitTime"),
+                            "videoStartTime": film_metrics_after_return.get("videoStartTime"),
+                        }
+                    except Exception as e:
+                        print(f"Не удалось собрать метрики видеоплеера: {e}")
+                        report["steps"]["film_page"] = {
+                            "playerInitTime": None,
+                            "videoStartTime": None  
+                        }
             
             
             # Завершение

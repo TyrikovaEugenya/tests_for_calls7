@@ -4,6 +4,10 @@
 """
 from typing import Dict, Tuple, Optional, List
 
+
+# === Режим запуска ===
+HEADLESS_OPTION = False
+
 # === Основное URL ===
 BASE_URL = "https://calls7.com"
 
@@ -19,7 +23,8 @@ SELECTORS: Dict[str, str] = {
     "popup_cta": "#dialog-link.dialog",
     "phone_popup_form": "#dialog-form",
     "phone_input": "#dialog-phone",
-    "phone_submit": "button[type='submit']",
+    "phone_submit": "#dialog-cta-btn",
+    "phone_error_message": "",
     "payment_iframe": "iframe[src='https://widget.cloudpayments.ru/next/app/widget']",
     "pay_button_in_iframe": "#cta-button",
     "pay_button_bank_card": "button[data-test='cardpay-page-button']",
@@ -113,6 +118,9 @@ BROWSERS: List[str] = ["chromium", "firefox", "webkit"]
 
 PAY_METHODS: List[str] = ["card", "sbp"]
 """Методы оплаты для тестирования"""
+
+PHONE_BRANCHES: List[str] = ["valid", "invalid", "paid"]
+TEST_PHONE_NUMBER = ""
 
 # === Отчёт ===
 REPORT_OUTPUT = "report.json"
