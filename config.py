@@ -5,7 +5,7 @@
 from typing import Dict, Tuple, Optional, List
 
 
-# === Режим запуска ===
+# === Режим запуска chromium ===
 HEADLESS_OPTION = False
 
 # === Основное URL ===
@@ -120,7 +120,7 @@ PAY_METHODS: List[str] = ["card", "sbp"]
 """Методы оплаты для тестирования"""
 
 PHONE_BRANCHES: List[str] = ["valid", "invalid", "paid"]
-TEST_PHONE_NUMBER = ""
+TEST_PHONE_NUMBER = "79108786244"
 
 # === Отчёт ===
 REPORT_OUTPUT = "report.json"

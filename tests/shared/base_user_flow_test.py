@@ -442,12 +442,12 @@ class BaseUserFlowTest:
 
             # 6. Оплата или смс
             if phone_branch == "paid":
-                sms_code_form = page.locator(config.SELECTORS[""])
+                video = page.locator(config.SELECTORS["video_element"])
+                video.wait_for(state="visible", timeout=30000)
                 sms_code_form_metric = {
-                    "smsFormTime": round((time.time() - sms_code_time_start) * 100)
+                    "afterPaidNumberLoadTime": round((time.time() - sms_code_time_start) * 100)
                 }
                 report["steps"]["film_page"].update(sms_code_form_metric)
-                assert sms_code_form, "Не появилась форма ввода смс кода"
             elif phone_branch == "invalid":
                 assert message is not None, "Не появилось диалоговое окно"
             else:
